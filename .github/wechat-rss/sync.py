@@ -149,8 +149,60 @@ def resolve_article_source(url: str) -> tuple[str, str]:
         if meta and meta.get("content"):
             title = str(meta.get("content") or "").strip()
 
+    if account_name or title:
+        return account_name, title
+
+    # Public permanent links can return a JS shell to plain HTTP clients.
+    # Render once in a normal headless browser. We do not solve CAPTCHAs,
+    # inject login state, rotate proxies, or bypass any verification page.
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as exc:
+        raise RuntimeError("公开页面只返回了脚本壳，且 Playwright 未安装") from exc
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                context = browser.new_context(user_agent=USER_AGENT, locale="zh-CN")
+                page = context.new_page()
+                response2 = page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=REQUEST_TIMEOUT * 1000,
+                )
+                if response2 and response2.status >= 400:
+                    raise RuntimeError(f"微信文章页面返回 HTTP {response2.status}")
+                page.wait_for_timeout(1500)
+                body_text = page.locator("body").inner_text(timeout=5000)
+                if any(marker.lower() in body_text.lower() for marker in BLOCK_MARKERS):
+                    raise RuntimeError("微信文章公开页要求验证码或限制访问，未尝试绕过")
+                values = page.evaluate(
+                    """() => ({
+                      account:
+                        document.querySelector('#js_name')?.textContent?.trim() ||
+                        document.querySelector('.rich_media_meta_nickname')?.textContent?.trim() ||
+                        document.querySelector('#js_wx_follow_nickname')?.textContent?.trim() ||
+                        (window.nickname || ''),
+                      title:
+                        document.querySelector('#activity-name')?.textContent?.trim() ||
+                        document.querySelector('h1.rich_media_title')?.textContent?.trim() ||
+                        document.querySelector('meta[property="og:title"]')?.content ||
+                        document.title || ''
+                    })"""
+                )
+            finally:
+                browser.close()
+        if isinstance(values, dict):
+            account_name = str(values.get("account") or "").strip()
+            title = str(values.get("title") or "").strip()
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"浏览器打开公开微信文章失败: {exc}") from exc
+
     if not account_name and not title:
-        raise RuntimeError("已打开微信文章，但公开页面里没有解析到公众号名称或文章标题")
+        raise RuntimeError("已打开微信文章，但公开页面仍未解析到公众号名称或文章标题")
     return account_name, title
 
 
