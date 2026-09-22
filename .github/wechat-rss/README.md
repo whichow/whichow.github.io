@@ -30,3 +30,17 @@ GitHub → Actions → **WeChat RSS Sync** → **Run workflow**。
 搜狗微信存在反爬与验证码，因此这种完全免登录方案的稳定性不可能等同于有授权/商业数据接口的方案。脚本检测到验证码或限制页时会停止该源本轮同步并保留旧数据，**不会绕过验证码、轮换代理或规避访问控制**。
 
 如果后续需要更稳定但仍然不扫码，可以再接 RedFoxHub 一类 API 数据源；那种方案只需要 API Key，不需要微信读书或微信登录。
+
+
+## RedFox 无状态 API
+
+工作流优先读取 GitHub Actions Secret `REDFOX_API_KEY`。配置后：
+
+1. 用 RedFox 搜索并锁定公众号账号；
+2. 调用 `queryWorkList` 获取最新文章列表；
+3. 生成静态 RSS；
+4. RedFox 调用失败时自动回退到搜狗公开检索。
+
+Secret 名必须是：`REDFOX_API_KEY`。
+
+不要把 API Key 写入仓库文件、workflow YAML、日志或 Issues。
