@@ -4,7 +4,8 @@
       "query": "",
       "seed_url": "https://mp.weixin.qq.com/s/wdi6wNrU2-dKg-DI09ml8Q",
       "name": "",
-      "enabled": true
+      "enabled": true,
+      "resolve_via": "public-page+sogou-title"
     }
   ]
 }
