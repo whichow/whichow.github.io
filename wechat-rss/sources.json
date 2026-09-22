@@ -5,7 +5,7 @@
       "seed_url": "https://mp.weixin.qq.com/s/wdi6wNrU2-dKg-DI09ml8Q",
       "name": "",
       "enabled": true,
-      "resolve_via": "public-page+sogou-title"
+      "resolve_via": "public-page+headless-browser+sogou-title"
     }
   ]
 }
