@@ -407,6 +407,147 @@ def fetch_profile_history(
     return result
 
 
+REDFOX_BASE = os.getenv("REDFOX_BASE_URL", "https://redfox.hk").rstrip("/")
+REDFOX_API_KEY = os.getenv("REDFOX_API_KEY", "").strip()
+
+
+def _parse_redfox_time(value) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return 0
+    if text.isdigit():
+        n = int(text)
+        return n // 1000 if n > 10_000_000_000 else n
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return int(datetime.strptime(text, fmt).replace(tzinfo=timezone.utc).timestamp())
+        except ValueError:
+            pass
+    return 0
+
+
+def _redfox_post(path: str, payload: dict) -> dict:
+    if not REDFOX_API_KEY:
+        raise RuntimeError("REDFOX_API_KEY 未配置")
+    response = requests.post(
+        REDFOX_BASE + path,
+        json=payload,
+        timeout=REQUEST_TIMEOUT,
+        headers={
+            "REDFOX_API_KEY": REDFOX_API_KEY,
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+        },
+    )
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, dict):
+        raise RuntimeError("RedFox 返回格式异常")
+    code = int(data.get("code") or 0)
+    if code not in (200, 2000):
+        raise RuntimeError(str(data.get("msg") or data.get("message") or f"RedFox code={code}"))
+    payload_data = data.get("data")
+    return payload_data if isinstance(payload_data, dict) else {}
+
+
+def _redfox_match_account(query: str, source: dict) -> dict:
+    cached = source.get("redfox") if isinstance(source.get("redfox"), dict) else {}
+    if cached and any(cached.get(k) for k in ("wxId", "bizInfo", "account")):
+        return cached
+
+    search = _redfox_post(
+        "/story/api/gzh/data/searchUser",
+        {"keyword": query, "offset": 0},
+    )
+    rows = search.get("list") or []
+    if not isinstance(rows, list) or not rows:
+        raise RuntimeError("RedFox 没有搜索到这个公众号")
+
+    qn = _norm_author(query)
+
+    def score(row: dict) -> tuple[int, int]:
+        account_name = _norm_author(str(row.get("accountName") or ""))
+        account = _norm_author(str(row.get("account") or ""))
+        wx_id = _norm_author(str(row.get("wxId") or ""))
+        exact = int(account_name == qn or account == qn or wx_id == qn)
+        starts = int(account_name.startswith(qn) or account.startswith(qn))
+        return (exact, starts)
+
+    candidates = [row for row in rows if isinstance(row, dict)]
+    candidates.sort(key=score, reverse=True)
+    best = candidates[0]
+    if score(best)[0] == 0 and len(candidates) > 1:
+        # For a nickname-like query, do not silently bind to a loosely related account.
+        raise RuntimeError("RedFox 搜索到了多个相近公众号，但没有精确匹配")
+
+    record = {
+        "account": str(best.get("account") or "").strip(),
+        "accountName": str(best.get("accountName") or "").strip(),
+        "wxId": str(best.get("wxId") or "").strip(),
+        "bizInfo": str(best.get("bizInfo") or "").strip(),
+    }
+    source["redfox"] = record
+    if record["accountName"] and not str(source.get("name") or "").strip():
+        source["name"] = record["accountName"]
+    return record
+
+
+def fetch_redfox(query: str, source: dict) -> tuple[list[dict], str, str]:
+    account = _redfox_match_account(query, source)
+    request_payload: dict = {"offset": 0, "sortType": "2"}
+    if account.get("wxId"):
+        request_payload["wxId"] = account["wxId"]
+    elif account.get("bizInfo"):
+        request_payload["bizInfo"] = account["bizInfo"]
+    elif account.get("account"):
+        request_payload["account"] = account["account"]
+    else:
+        raise RuntimeError("RedFox 账号信息缺少可查询标识")
+
+    data = _redfox_post("/story/api/gzh/data/queryWorkList", request_payload)
+    rows = data.get("list") or []
+    if not isinstance(rows, list):
+        rows = []
+
+    items: list[dict] = []
+    display_name = str(account.get("accountName") or query).strip()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        title = str(row.get("title") or "").strip()
+        url = str(row.get("workUrl") or "").strip()
+        if not title:
+            continue
+        work_uuid = str(row.get("workUuid") or "").strip()
+        guid = work_uuid or url or hashlib.sha1(
+            (title + "|" + str(row.get("publishTime") or "")).encode("utf-8")
+        ).hexdigest()
+        items.append(
+            {
+                "guid": guid,
+                "title": title,
+                "description": str(row.get("summary") or "").strip(),
+                "author": str(row.get("author") or display_name).strip(),
+                "publish_at": _parse_redfox_time(row.get("publishTime")),
+                "url": url,
+                "cover_url": str(row.get("coverUrl") or "").strip(),
+                "read_count": row.get("readCount"),
+                "like_count": row.get("likeCount"),
+                "fetched_at": int(time.time()),
+                "source": "redfox",
+            }
+        )
+
+    if not items:
+        raise RuntimeError("RedFox 没有返回公众号文章")
+    items.sort(key=lambda x: int(x.get("publish_at") or 0), reverse=True)
+    return items, display_name, REDFOX_BASE
+
+
 def fetch_sogou(query: str) -> tuple[list[dict], str, str]:
     session = requests.Session()
     session.headers.update(
@@ -628,7 +769,7 @@ main{{max-width:900px;margin:auto;padding:48px 20px 90px}}a{{color:#1570ef;text-
 .row{{display:flex;justify-content:space-between;gap:16px}}code,small{{color:var(--muted)}}.pill{{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 9px}}.ok{{color:#12b76a}}.warn,.error{{color:#f79009}}
 .recent{{margin-top:34px}}article{{padding:14px 0;border-bottom:1px solid var(--line)}}article a{{font-weight:650}}article small{{display:block;margin-top:4px}}
 </style><main><header><h1>微信公众号 RSS</h1>
-<p>GitHub Actions · 搜狗微信公开检索 · 无微信读书 · 无扫码 · 无登录态</p>
+<p>GitHub Actions · RedFox 优先 / 搜狗公开检索兜底 · 无微信读书 · 无扫码 · 无微信登录态</p>
 <p><a href="{html.escape(all_feed)}">订阅全部公众号 RSS</a></p></header>
 <div class="grid">{''.join(cards)}</div>
 <section class="recent"><h2>最近文章</h2>{recent_html or '<p>暂无文章。</p>'}</section>
@@ -685,11 +826,29 @@ def main() -> int:
         search_url = ""
         parsed_name = display or query
         try:
-            new_items, detected_name, search_url = fetch_sogou(query)
+            if REDFOX_API_KEY:
+                try:
+                    new_items, detected_name, search_url = fetch_redfox(query, source)
+                    source["last_backend"] = "redfox"
+                    save_sources(sources)
+                except Exception as redfox_exc:
+                    print(f"[redfox] {query}: {redfox_exc}; fallback to Sogou", file=sys.stderr)
+                    new_items, detected_name, search_url = fetch_sogou(query)
+                    source["last_backend"] = "sogou-fallback"
+                    source["last_redfox_error"] = str(redfox_exc)
+                    save_sources(sources)
+            else:
+                new_items, detected_name, search_url = fetch_sogou(query)
+                source["last_backend"] = "sogou"
+                save_sources(sources)
+
             if not display:
                 parsed_name = detected_name
             items = merge_items(new_items, old_items, expected_author=query)
-            print(f"[sync] {query}: +{len(new_items)} fetched, {len(items)} stored")
+            print(
+                f"[sync] {query}: backend={source.get('last_backend')}, "
+                f"+{len(new_items)} fetched, {len(items)} stored"
+            )
         except Exception as exc:
             status = "blocked"
             message = str(exc)
