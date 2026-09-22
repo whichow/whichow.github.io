@@ -1,6 +1,9 @@
 name: WeChat RSS Sync
 
 on:
+  push:
+    paths:
+      - ".github/workflows/wechat-rss-sync.yml"
   schedule:
     - cron: "23 */6 * * *"
   workflow_dispatch:
