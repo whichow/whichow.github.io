@@ -1,29 +1,48 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import os
+import re
 import sys
+import time
 from datetime import datetime, timezone
+from email.utils import format_datetime
 from pathlib import Path
-from typing import Any
+from urllib.parse import urljoin
+
+import requests
+from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
-STATE_DIR = ROOT / ".state"
 PUBLIC_DIR = ROOT / "wechat-rss"
-VENDOR_DIR = ROOT / ".vendor" / "wechrss"
-STATE_DIR.mkdir(parents=True, exist_ok=True)
-PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
-sys.path.insert(0, str(VENDOR_DIR))
+DATA_DIR = PUBLIC_DIR / "data"
+RSS_DIR = PUBLIC_DIR / "rss"
+SOURCES_FILE = PUBLIC_DIR / "sources.json"
 
-from service import AppDB, CredentialStore, SyncService  # type: ignore
-from wechat_mp_fetcher import FetcherError, render_rss  # type: ignore
+SOGOU_HOST = "https://weixin.sogou.com"
+SOGOU_SEARCH = f"{SOGOU_HOST}/weixin"
+USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+BLOCK_MARKERS = (
+    "请输入验证码",
+    "访问过于频繁",
+    "您的访问过于频繁",
+    "异常访问",
+    "antispider",
+    "seccode",
+)
 
-REQUEST_INTERVAL = max(2.0, float(os.getenv("WEREAD_MIN_INTERVAL", "5")))
-RSS_LIMIT = max(10, min(int(os.getenv("RSS_LIMIT", "50")), 200))
 ADD_SOURCE = os.getenv("ADD_SOURCE", "").strip()
 ADD_NAME = os.getenv("ADD_NAME", "").strip()
+MAX_ITEMS = max(20, min(int(os.getenv("MAX_ITEMS", "120")), 500))
+REQUEST_TIMEOUT = max(5, int(os.getenv("REQUEST_TIMEOUT", "20")))
 
 
 def page_base_url() -> str:
@@ -34,200 +53,344 @@ def page_base_url() -> str:
     return f"https://{owner}.github.io/{repo}/wechat-rss"
 
 
-def iso_ts(ts: int) -> str:
+def slug_for(query: str) -> str:
+    return hashlib.sha1(query.encode("utf-8")).hexdigest()[:12]
+
+
+def load_sources() -> list[dict]:
+    if not SOURCES_FILE.exists():
+        return []
+    try:
+        data = json.loads(SOURCES_FILE.read_text("utf-8"))
+        sources = data.get("sources", []) if isinstance(data, dict) else []
+        return [x for x in sources if isinstance(x, dict) and str(x.get("query", "")).strip()]
+    except Exception:
+        return []
+
+
+def save_sources(sources: list[dict]) -> None:
+    PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+    SOURCES_FILE.write_text(
+        json.dumps({"sources": sources}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def add_source(sources: list[dict]) -> list[dict]:
+    if not ADD_SOURCE:
+        return sources
+    query = ADD_SOURCE.strip()
+    for item in sources:
+        if str(item.get("query", "")).strip().lower() == query.lower():
+            if ADD_NAME:
+                item["name"] = ADD_NAME
+            item["enabled"] = True
+            save_sources(sources)
+            print(f"[source] already exists: {query}")
+            return sources
+    sources.append({"query": query, "name": ADD_NAME, "enabled": True})
+    save_sources(sources)
+    print(f"[source] added: {query}")
+    return sources
+
+
+def parse_timestamp(script_text: str) -> int:
+    match = re.search(r"timeConvert\(['\"]?(\d+)['\"]?\)", script_text or "")
+    return int(match.group(1)) if match else 0
+
+
+def resolve_sogou_link(session: requests.Session, href: str) -> str:
+    url = urljoin(SOGOU_HOST, href)
+    try:
+        response = session.get(
+            url,
+            timeout=REQUEST_TIMEOUT,
+            allow_redirects=False,
+            headers={"Referer": SOGOU_SEARCH},
+        )
+        location = response.headers.get("Location", "").strip()
+        if location:
+            target = urljoin(url, location)
+            if target.startswith(("https://mp.weixin.qq.com/", "http://mp.weixin.qq.com/")):
+                return target
+            # One conservative extra redirect hop. No cookies, CAPTCHA handling,
+            # proxy rotation, or access-control bypass.
+            second = session.get(
+                target,
+                timeout=REQUEST_TIMEOUT,
+                allow_redirects=False,
+                headers={"Referer": url},
+            )
+            location2 = second.headers.get("Location", "").strip()
+            if location2:
+                target2 = urljoin(target, location2)
+                if target2.startswith(("https://mp.weixin.qq.com/", "http://mp.weixin.qq.com/")):
+                    return target2
+    except requests.RequestException:
+        pass
+    return url
+
+
+def fetch_sogou(query: str) -> tuple[list[dict], str, str]:
+    session = requests.Session()
+    session.headers.update(
+        {
+            "User-Agent": USER_AGENT,
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+    )
+    response = session.get(
+        SOGOU_SEARCH,
+        params={
+            "type": "2",
+            "query": query,
+            "ie": "utf8",
+            "s_from": "input",
+            "page": "1",
+        },
+        timeout=REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    text = response.text
+    lowered = text.lower()
+    if any(marker.lower() in lowered for marker in BLOCK_MARKERS):
+        raise RuntimeError("搜狗微信要求验证码或限制访问；本任务不会绕过验证，保留旧数据等待下次同步")
+
+    soup = BeautifulSoup(text, "html.parser")
+    nodes = soup.select("ul.news-list > li")
+    if not nodes:
+        raise RuntimeError("搜狗微信没有返回文章结果；请确认输入的是准确公众号名称或微信号")
+
+    items: list[dict] = []
+    account_name = ""
+    for node in nodes:
+        anchor = node.select_one("h3 > a")
+        if anchor is None:
+            continue
+        title = anchor.get_text(" ", strip=True)
+        href = str(anchor.get("href") or "").strip()
+        if not title or not href:
+            continue
+
+        description_node = node.select_one("p.txt-info")
+        description = description_node.get_text(" ", strip=True) if description_node else ""
+
+        author_node = node.select_one("span.all-time-y2")
+        author = author_node.get_text(" ", strip=True) if author_node else ""
+        if author and not account_name:
+            account_name = author
+
+        script_node = node.select_one("span.s2 script")
+        publish_at = parse_timestamp(script_node.get_text(" ", strip=True) if script_node else "")
+
+        link = resolve_sogou_link(session, href)
+        guid = link or urljoin(SOGOU_HOST, href)
+        items.append(
+            {
+                "guid": guid,
+                "title": title,
+                "description": description,
+                "author": author,
+                "publish_at": publish_at,
+                "url": link,
+                "sogou_url": urljoin(SOGOU_HOST, href),
+                "fetched_at": int(time.time()),
+            }
+        )
+
+    if not items:
+        raise RuntimeError("搜狗微信页面已返回，但没有解析到有效文章")
+    return items, account_name or query, response.url
+
+
+def load_old_items(slug: str) -> list[dict]:
+    path = DATA_DIR / f"{slug}.json"
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text("utf-8"))
+        items = payload.get("items", []) if isinstance(payload, dict) else []
+        return [x for x in items if isinstance(x, dict)]
+    except Exception:
+        return []
+
+
+def merge_items(new_items: list[dict], old_items: list[dict]) -> list[dict]:
+    merged: dict[str, dict] = {}
+    for item in old_items + new_items:
+        key = str(item.get("guid") or "").strip()
+        if not key:
+            key = hashlib.sha1(
+                (str(item.get("title", "")) + "|" + str(item.get("publish_at", 0))).encode("utf-8")
+            ).hexdigest()
+        merged[key] = item
+    return sorted(
+        merged.values(),
+        key=lambda x: (int(x.get("publish_at") or 0), int(x.get("fetched_at") or 0)),
+        reverse=True,
+    )[:MAX_ITEMS]
+
+
+def write_rss(path: Path, title: str, items: list[dict], link: str) -> None:
+    rss = ET.Element("rss", {"version": "2.0"})
+    channel = ET.SubElement(rss, "channel")
+    ET.SubElement(channel, "title").text = title
+    ET.SubElement(channel, "link").text = link
+    ET.SubElement(channel, "description").text = f"{title} - GitHub Actions 静态 RSS"
+    ET.SubElement(channel, "lastBuildDate").text = format_datetime(datetime.now(timezone.utc))
+    for item in items:
+        entry = ET.SubElement(channel, "item")
+        ET.SubElement(entry, "title").text = str(item.get("title") or "")
+        ET.SubElement(entry, "link").text = str(item.get("url") or item.get("sogou_url") or "")
+        ET.SubElement(entry, "guid", {"isPermaLink": "false"}).text = str(item.get("guid") or "")
+        ts = int(item.get("publish_at") or 0)
+        if ts:
+            ET.SubElement(entry, "pubDate").text = format_datetime(
+                datetime.fromtimestamp(ts, timezone.utc)
+            )
+        ET.SubElement(entry, "description").text = str(item.get("description") or "")
+        author = str(item.get("author") or "")
+        if author:
+            ET.SubElement(entry, "author").text = author
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ET.ElementTree(rss).write(path, encoding="utf-8", xml_declaration=True)
+
+
+def fmt_time(ts: int) -> str:
     if not ts:
         return ""
     return datetime.fromtimestamp(ts, timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
 
 
-def jsafe(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {k: jsafe(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [jsafe(v) for v in value]
-    return value
-
-
-def write_outputs(db: AppDB, statuses: dict[int, dict[str, Any]]) -> None:
-    base = page_base_url()
-    rss_dir = PUBLIC_DIR / "rss"
-    rss_dir.mkdir(parents=True, exist_ok=True)
-
-    sources = db.list_sources()
-    all_articles = []
-    data_sources: list[dict[str, Any]] = []
-
-    for source in sources:
-        articles = db.get_articles(source.book_id, limit=source.rss_limit or RSS_LIMIT)
-        all_articles.extend(articles)
-        feed_name = f"feed-{source.id}.xml"
-        (rss_dir / feed_name).write_bytes(
-            render_rss(
-                articles,
-                feed_title=source.name or source.book_id,
-                feed_link=f"{base}/",
-            )
-        )
-        data_sources.append(
-            {
-                "id": source.id,
-                "name": source.name or source.book_id,
-                "book_id": source.book_id,
-                "article_url": source.article_url,
-                "feed": f"{base}/rss/{feed_name}",
-                "last_sync_at": source.last_sync_at,
-                "status": statuses.get(source.id, {}).get("status", source.last_status),
-                "message": statuses.get(source.id, {}).get("message", source.last_error),
-                "article_count": len(articles),
-                "articles": [
-                    {
-                        "review_id": a.review_id,
-                        "title": a.title,
-                        "summary": a.summary,
-                        "url": a.url,
-                        "cover_url": a.cover_url,
-                        "publish_at": a.publish_at,
-                        "author": a.author,
-                    }
-                    for a in articles[:30]
-                ],
-            }
-        )
-
-    dedup = {}
-    for a in all_articles:
-        dedup[a.review_id] = a
-    merged = sorted(dedup.values(), key=lambda a: a.publish_at, reverse=True)[:100]
-    (rss_dir / "all.xml").write_bytes(
-        render_rss(merged, feed_title="微信公众号 RSS 汇总", feed_link=f"{base}/")
-    )
-
-    payload = {
-        "updated_at": int(datetime.now(timezone.utc).timestamp()),
-        "base_url": base,
-        "all_feed": f"{base}/rss/all.xml",
-        "sources": data_sources,
-    }
-    (PUBLIC_DIR / "data.json").write_text(
-        json.dumps(jsafe(payload), ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    (PUBLIC_DIR / ".nojekyll").write_text("", encoding="utf-8")
-    (PUBLIC_DIR / "index.html").write_text(render_index(payload), encoding="utf-8")
-
-
-def render_index(payload: dict[str, Any]) -> str:
-    updated = iso_ts(payload["updated_at"])
-    source_cards = []
-    recent = []
-    for source in payload["sources"]:
-        status = source["status"] or "never"
-        status_class = "ok" if status == "ok" else ("warn" if status in {"risk_control", "auth_expired"} else "muted")
-        msg = source.get("message") or ""
-        source_cards.append(
+def render_index(source_outputs: list[dict], all_feed: str) -> str:
+    cards = []
+    recent: list[tuple[int, str, dict]] = []
+    for src in source_outputs:
+        status = src["status"]
+        status_label = "正常" if status == "ok" else "暂时受限"
+        status_class = "ok" if status == "ok" else "warn"
+        cards.append(
             f"""<section class="card">
-<div class="row"><div><h2>{html.escape(source["name"])}</h2><code>{html.escape(source["book_id"])}</code></div>
-<span class="pill {status_class}">{html.escape(status)}</span></div>
-<p>{source["article_count"]} 篇已保存 · <a href="{html.escape(source["feed"])}">独立 RSS</a></p>
-{f'<p class="error">{html.escape(msg)}</p>' if msg else ''}
+<div class="row"><div><h2>{html.escape(src["name"])}</h2><code>{html.escape(src["query"])}</code></div>
+<span class="pill {status_class}">{status_label}</span></div>
+<p>{len(src["items"])} 篇已保存 · <a href="{html.escape(src["feed"])}">独立 RSS</a></p>
+{f'<p class="error">{html.escape(src["message"])}</p>' if src["message"] else ''}
 </section>"""
         )
-        for article in source["articles"][:8]:
-            if not article["url"]:
-                continue
-            recent.append((article["publish_at"], source["name"], article))
+        for item in src["items"][:10]:
+            recent.append((int(item.get("publish_at") or 0), src["name"], item))
     recent.sort(key=lambda x: x[0], reverse=True)
     recent_html = "\n".join(
-        f"""<article><a href="{html.escape(item["url"])}" target="_blank" rel="noreferrer">{html.escape(item["title"])}</a>
-<small>{html.escape(name)} · {html.escape(iso_ts(item["publish_at"]))}</small></article>"""
-        for _, name, item in recent[:40]
+        f"""<article><a href="{html.escape(str(item.get("url") or item.get("sogou_url") or ""))}" target="_blank" rel="noreferrer">{html.escape(str(item.get("title") or ""))}</a>
+<small>{html.escape(name)} · {html.escape(fmt_time(int(item.get("publish_at") or 0)))}</small></article>"""
+        for _, name, item in recent[:50]
     )
-    if not source_cards:
-        source_cards.append(
+    if not cards:
+        cards.append(
             """<section class="card"><h2>还没有公众号</h2>
-<p>打开 GitHub → Actions → <b>WeChat RSS Sync</b> → Run workflow，在 <code>source</code> 中粘贴任意一篇目标公众号文章链接。</p></section>"""
+<p>GitHub → Actions → <b>WeChat RSS Sync</b> → Run workflow，在 <code>source</code> 中输入公众号准确名称或微信号即可。</p></section>"""
         )
 
-    return f"""<!doctype html>
-<html lang="zh-CN">
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>微信公众号 RSS</title>
+    return f"""<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>微信公众号 RSS</title>
 <style>
-:root{{color-scheme:light dark;--bg:#f7f8fa;--card:#fff;--text:#182026;--muted:#667085;--line:#e4e7ec;--accent:#12b76a}}
+:root{{--bg:#f7f8fa;--card:#fff;--text:#182026;--muted:#667085;--line:#e4e7ec}}
 @media(prefers-color-scheme:dark){{:root{{--bg:#101214;--card:#171a1d;--text:#f2f4f7;--muted:#98a2b3;--line:#344054}}}}
-*{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6}}
-main{{max-width:900px;margin:0 auto;padding:48px 20px 90px}} a{{color:#1570ef;text-decoration:none}} a:hover{{text-decoration:underline}}
-header{{margin-bottom:28px}} h1{{font-size:clamp(30px,5vw,46px);margin:0 0 8px}} h2{{margin:0;font-size:20px}}
-.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}} .card{{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}}
-.row{{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}} code{{font-size:12px;color:var(--muted)}}
-.pill{{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 9px}} .pill.ok{{color:#12b76a}} .pill.warn{{color:#f79009}}
-.error{{color:#d92d20;font-size:13px}} .recent{{margin-top:34px}} article{{padding:14px 0;border-bottom:1px solid var(--line)}} article a{{font-weight:650}}
-article small{{display:block;color:var(--muted);margin-top:4px}} footer{{margin-top:36px;color:var(--muted);font-size:13px}}
-</style>
-<main>
-<header><h1>微信公众号 RSS</h1><p>GitHub Actions 定时同步 · 静态 RSS · 原文阅读</p>
-<p><a href="{html.escape(payload["all_feed"])}">订阅全部公众号 RSS</a></p><small>最近更新：{html.escape(updated)}</small></header>
-<div class="grid">{''.join(source_cards)}</div>
+*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6}}
+main{{max-width:900px;margin:auto;padding:48px 20px 90px}}a{{color:#1570ef;text-decoration:none}}h1{{font-size:clamp(30px,5vw,46px);margin:0 0 8px}}h2{{margin:0;font-size:20px}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}}.card{{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}}
+.row{{display:flex;justify-content:space-between;gap:16px}}code,small{{color:var(--muted)}}.pill{{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 9px}}.ok{{color:#12b76a}}.warn,.error{{color:#f79009}}
+.recent{{margin-top:34px}}article{{padding:14px 0;border-bottom:1px solid var(--line)}}article a{{font-weight:650}}article small{{display:block;margin-top:4px}}
+</style><main><header><h1>微信公众号 RSS</h1>
+<p>GitHub Actions · 搜狗微信公开检索 · 无微信读书 · 无扫码 · 无登录态</p>
+<p><a href="{html.escape(all_feed)}">订阅全部公众号 RSS</a></p></header>
+<div class="grid">{''.join(cards)}</div>
 <section class="recent"><h2>最近文章</h2>{recent_html or '<p>暂无文章。</p>'}</section>
-<footer>仅同步标题、时间、摘要、封面与原文链接；不自动抓取正文。遇到风控/验证码会停止，不绕过平台控制。</footer>
+<footer><small>只整理公开搜索结果中的标题、摘要、发布时间和原文/跳转链接。遇到验证码或访问限制会停止，不绕过验证。</small></footer>
 </main></html>"""
 
 
-def add_source_if_requested(db: AppDB) -> None:
-    if not ADD_SOURCE:
-        return
-    try:
-        source = db.add_source(
-            source_value=ADD_SOURCE,
-            name=ADD_NAME,
-            interval_minutes=360,
-            fetch_content=False,
-            rss_limit=RSS_LIMIT,
-        )
-        print(f"[sync] added source #{source.id}: {source.name or source.book_id}")
-    except FetcherError as exc:
-        if "已存在" in str(exc):
-            print(f"[sync] source already exists: {exc}")
-            return
-        raise
-
-
 def main() -> int:
-    db_path = STATE_DIR / "wechat_mp.db"
-    creds_path = STATE_DIR / "credentials.json"
-    if not creds_path.exists():
-        print("缺少登录状态。请先运行 WeChat RSS Login 工作流。", file=sys.stderr)
-        return 3
+    PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    RSS_DIR.mkdir(parents=True, exist_ok=True)
+    (PUBLIC_DIR / ".nojekyll").write_text("", encoding="utf-8")
 
-    db = AppDB(db_path)
-    add_source_if_requested(db)
-    creds = CredentialStore(creds_path)
-    service = SyncService(
-        db,
-        creds,
-        request_interval=REQUEST_INTERVAL,
-        timeout=25,
-    )
+    sources = add_source(load_sources())
+    base = page_base_url()
+    outputs: list[dict] = []
+    all_items: dict[str, dict] = {}
 
-    statuses: dict[int, dict[str, Any]] = {}
-    for source in db.list_sources():
-        result = service.sync_source(source.id)
-        statuses[source.id] = {"status": result.status, "message": result.message}
-        print(
-            f"[sync] {source.name or source.book_id}: "
-            f"status={result.status}, received={result.received}, new={result.new_count}"
+    for source in sources:
+        if not bool(source.get("enabled", True)):
+            continue
+        query = str(source.get("query") or "").strip()
+        display = str(source.get("name") or "").strip()
+        slug = slug_for(query)
+        old_items = load_old_items(slug)
+        status = "ok"
+        message = ""
+        search_url = ""
+        parsed_name = display or query
+        try:
+            new_items, detected_name, search_url = fetch_sogou(query)
+            if not display:
+                parsed_name = detected_name
+            items = merge_items(new_items, old_items)
+            print(f"[sync] {query}: +{len(new_items)} fetched, {len(items)} stored")
+        except Exception as exc:
+            status = "blocked"
+            message = str(exc)
+            items = old_items
+            print(f"[sync] {query}: {message}", file=sys.stderr)
+
+        payload = {
+            "query": query,
+            "name": parsed_name,
+            "status": status,
+            "message": message,
+            "search_url": search_url,
+            "updated_at": int(time.time()),
+            "items": items,
+        }
+        (DATA_DIR / f"{slug}.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
         )
+        feed = f"{base}/rss/{slug}.xml"
+        write_rss(RSS_DIR / f"{slug}.xml", parsed_name, items, feed)
+        outputs.append({**payload, "feed": feed})
+        for item in items:
+            key = str(item.get("guid") or "")
+            if key:
+                all_items[key] = item
 
-    write_outputs(db, statuses)
+    merged_all = sorted(
+        all_items.values(),
+        key=lambda x: (int(x.get("publish_at") or 0), int(x.get("fetched_at") or 0)),
+        reverse=True,
+    )[:300]
+    all_feed = f"{base}/rss/all.xml"
+    write_rss(RSS_DIR / "all.xml", "微信公众号 RSS 汇总", merged_all, all_feed)
+    (PUBLIC_DIR / "data.json").write_text(
+        json.dumps(
+            {"updated_at": int(time.time()), "all_feed": all_feed, "sources": outputs},
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n",
+        encoding="utf-8",
+    )
+    (PUBLIC_DIR / "index.html").write_text(render_index(outputs, all_feed), encoding="utf-8")
+
     summary = os.getenv("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as f:
             f.write("## 微信公众号 RSS 同步\n\n")
-            if not statuses:
-                f.write("还没有公众号。重新运行此工作流，并在 `source` 输入一篇公众号文章链接即可添加。\n")
-            for source in db.list_sources():
-                st = statuses.get(source.id, {})
-                f.write(f"- **{source.name or source.book_id}**：`{st.get('status', source.last_status)}`\n")
-            f.write(f"\n站点：{page_base_url()}/\n")
+            f.write("数据源：搜狗微信公开检索（不使用微信读书，不需要扫码）。\n\n")
+            for src in outputs:
+                f.write(f"- **{src['name']}**：`{src['status']}`，保存 {len(src['items'])} 篇\n")
+            f.write(f"\n站点：{base}/\n")
     return 0
 
 
