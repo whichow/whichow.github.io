@@ -1,5 +1,16 @@
 {
-  "updated_at": 1790092479,
+  "updated_at": 1790092572,
   "all_feed": "https://whichow.github.io/wechat-rss/rss/all.xml",
-  "sources": []
+  "sources": [
+    {
+      "query": "https://mp.weixin.qq.com/s/wdi6wNrU2-dKg-DI09ml8Q",
+      "name": "https://mp.weixin.qq.com/s/wdi6wNrU2-dKg-DI09ml8Q",
+      "status": "blocked",
+      "message": "已打开微信文章，但公开页面里没有解析到公众号名称或文章标题",
+      "search_url": "",
+      "updated_at": 1790092572,
+      "items": [],
+      "feed": "https://whichow.github.io/wechat-rss/rss/8a556ba27eac.xml"
+    }
+  ]
 }
