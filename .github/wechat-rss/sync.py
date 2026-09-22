@@ -534,11 +534,21 @@ def merge_items(
 
     merged: dict[str, dict] = {}
     for item in old_items + new_items:
-        key = str(item.get("guid") or "").strip()
-        if not key:
+        title = str(item.get("title") or "").strip()
+        author = str(item.get("author") or "").strip()
+        publish_at = int(item.get("publish_at") or 0)
+        # Sogou redirect URLs contain short-lived tokens, so they are not stable
+        # identifiers across runs. Prefer semantic identity for de-duplication.
+        if title and publish_at:
             key = hashlib.sha1(
-                (str(item.get("title", "")) + "|" + str(item.get("publish_at", 0))).encode("utf-8")
+                f"{_norm_author(author)}|{title}|{publish_at}".encode("utf-8")
             ).hexdigest()
+        else:
+            key = str(item.get("guid") or "").strip()
+            if not key:
+                key = hashlib.sha1(
+                    (title + "|" + str(publish_at)).encode("utf-8")
+                ).hexdigest()
         merged[key] = item
     return sorted(
         merged.values(),
