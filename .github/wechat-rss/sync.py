@@ -63,7 +63,14 @@ def load_sources() -> list[dict]:
     try:
         data = json.loads(SOURCES_FILE.read_text("utf-8"))
         sources = data.get("sources", []) if isinstance(data, dict) else []
-        return [x for x in sources if isinstance(x, dict) and str(x.get("query", "")).strip()]
+        return [
+            x for x in sources
+            if isinstance(x, dict)
+            and (
+                str(x.get("query", "")).strip()
+                or str(x.get("seed_url", "")).strip()
+            )
+        ]
     except Exception:
         return []
 
@@ -76,21 +83,127 @@ def save_sources(sources: list[dict]) -> None:
     )
 
 
+def is_wechat_article_url(value: str) -> bool:
+    value = value.strip()
+    return value.startswith(("https://mp.weixin.qq.com/s", "http://mp.weixin.qq.com/s"))
+
+
+def resolve_article_source(url: str) -> tuple[str, str]:
+    """Resolve a public WeChat article URL to (account_name, article_title).
+
+    No login, cookies, CAPTCHA solving, or browser automation is used.
+    """
+    response = requests.get(
+        url,
+        timeout=REQUEST_TIMEOUT,
+        allow_redirects=True,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Referer": "https://mp.weixin.qq.com/",
+        },
+    )
+    response.raise_for_status()
+    text = response.text
+    lowered = text.lower()
+    if any(marker.lower() in lowered for marker in BLOCK_MARKERS):
+        raise RuntimeError("微信文章公开页要求验证码或限制访问，无法从该链接识别公众号")
+
+    soup = BeautifulSoup(text, "html.parser")
+    account_name = ""
+    for selector in (
+        "#js_name",
+        ".rich_media_meta_nickname",
+        "#js_wx_follow_nickname",
+    ):
+        node = soup.select_one(selector)
+        if node:
+            account_name = node.get_text(" ", strip=True)
+            if account_name:
+                break
+
+    if not account_name:
+        meta = soup.find("meta", attrs={"property": "og:article:author"})
+        if meta and meta.get("content"):
+            account_name = str(meta.get("content") or "").strip()
+
+    if not account_name:
+        patterns = (
+            r'(?:var\s+)?nickname\s*=\s*["\'](.+?)["\']\s*;',
+            r'window\.nickname\s*=\s*["\'](.+?)["\']\s*;',
+        )
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.I | re.S)
+            if match:
+                account_name = html.unescape(match.group(1)).strip()
+                if account_name:
+                    break
+
+    title = ""
+    title_node = soup.select_one("#activity-name, h1.rich_media_title")
+    if title_node:
+        title = title_node.get_text(" ", strip=True)
+    if not title:
+        meta = soup.find("meta", attrs={"property": "og:title"})
+        if meta and meta.get("content"):
+            title = str(meta.get("content") or "").strip()
+
+    if not account_name:
+        raise RuntimeError("已打开微信文章，但公开页面里没有解析到公众号名称")
+    return account_name, title
+
+
+def normalize_source(source: dict) -> tuple[str, str]:
+    """Return (query, display_name), resolving seed article URLs when needed."""
+    query = str(source.get("query") or "").strip()
+    seed_url = str(source.get("seed_url") or "").strip()
+    display = str(source.get("name") or "").strip()
+
+    if is_wechat_article_url(query) and not seed_url:
+        seed_url = query
+        source["seed_url"] = seed_url
+        source["query"] = ""
+        query = ""
+
+    if not query and seed_url:
+        account_name, article_title = resolve_article_source(seed_url)
+        query = account_name
+        source["query"] = query
+        source["resolved_from"] = seed_url
+        if article_title:
+            source["seed_title"] = article_title
+        if not display:
+            source["name"] = account_name
+            display = account_name
+        print(f"[source] resolved article URL -> {account_name}")
+
+    if not query:
+        raise RuntimeError("公众号订阅缺少可搜索的名称或微信号")
+    return query, display or query
+
+
 def add_source(sources: list[dict]) -> list[dict]:
     if not ADD_SOURCE:
         return sources
-    query = ADD_SOURCE.strip()
+    raw = ADD_SOURCE.strip()
+    key = raw.lower()
     for item in sources:
-        if str(item.get("query", "")).strip().lower() == query.lower():
+        existing = str(item.get("seed_url") or item.get("query") or "").strip().lower()
+        if existing == key:
             if ADD_NAME:
                 item["name"] = ADD_NAME
             item["enabled"] = True
             save_sources(sources)
-            print(f"[source] already exists: {query}")
+            print(f"[source] already exists: {raw}")
             return sources
-    sources.append({"query": query, "name": ADD_NAME, "enabled": True})
+
+    if is_wechat_article_url(raw):
+        sources.append({"query": "", "seed_url": raw, "name": ADD_NAME, "enabled": True})
+    else:
+        sources.append({"query": raw, "name": ADD_NAME, "enabled": True})
     save_sources(sources)
-    print(f"[source] added: {query}")
+    print(f"[source] added: {raw}")
     return sources
 
 
@@ -325,8 +438,34 @@ def main() -> int:
     for source in sources:
         if not bool(source.get("enabled", True)):
             continue
-        query = str(source.get("query") or "").strip()
-        display = str(source.get("name") or "").strip()
+        try:
+            query, display = normalize_source(source)
+            save_sources(sources)
+        except Exception as exc:
+            query = str(source.get("query") or source.get("seed_url") or "").strip()
+            display = str(source.get("name") or query or "未识别公众号").strip()
+            slug = slug_for(query or display)
+            old_items = load_old_items(slug)
+            message = str(exc)
+            print(f"[source] {message}", file=sys.stderr)
+            payload = {
+                "query": query,
+                "name": display,
+                "status": "blocked",
+                "message": message,
+                "search_url": "",
+                "updated_at": int(time.time()),
+                "items": old_items,
+            }
+            (DATA_DIR / f"{slug}.json").write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            feed = f"{base}/rss/{slug}.xml"
+            write_rss(RSS_DIR / f"{slug}.xml", display, old_items, feed)
+            outputs.append({**payload, "feed": feed})
+            continue
+
         slug = slug_for(query)
         old_items = load_old_items(slug)
         status = "ok"
