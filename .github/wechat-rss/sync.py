@@ -320,6 +320,93 @@ def resolve_sogou_link(session: requests.Session, href: str) -> str:
     return url
 
 
+def _norm_author(value: str) -> str:
+    return re.sub(r"\s+", "", (value or "")).casefold()
+
+
+def _normalize_wechat_url(value: str) -> str:
+    value = html.unescape(str(value or "")).strip()
+    value = value.replace(r"\/","/").replace(r"\x26","&").replace(r"\u0026","&")
+    if value.startswith("//"):
+        return "https:" + value
+    if value.startswith("/"):
+        return "https://mp.weixin.qq.com" + value
+    return value
+
+
+def fetch_profile_history(
+    session: requests.Session,
+    profile_url: str,
+    account_name: str,
+) -> list[dict]:
+    if not profile_url:
+        return []
+    url = urljoin(SOGOU_HOST, profile_url)
+    try:
+        response = session.get(
+            url,
+            timeout=REQUEST_TIMEOUT,
+            allow_redirects=True,
+            headers={"Referer": SOGOU_SEARCH},
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        return []
+
+    text = response.text
+    lowered = text.lower()
+    if any(marker.lower() in lowered for marker in BLOCK_MARKERS):
+        return []
+
+    # Sogou's public-account history page embeds the recent message list in
+    # `var msgList = {...};`. This is public page data; no login state or
+    # CAPTCHA handling is used.
+    match = re.search(r"var\s+msgList\s*=\s*(.*?)\}\}\]\};", text, flags=re.S)
+    if not match:
+        return []
+    raw = match.group(1) + "}}]}"
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return []
+
+    result: list[dict] = []
+    for group in payload.get("list") or []:
+        if not isinstance(group, dict):
+            continue
+        comm = group.get("comm_msg_info") if isinstance(group.get("comm_msg_info"), dict) else {}
+        ext = group.get("app_msg_ext_info") if isinstance(group.get("app_msg_ext_info"), dict) else {}
+        publish_at = int(comm.get("datetime") or 0)
+
+        candidates = [ext]
+        multi = ext.get("multi_app_msg_item_list")
+        if isinstance(multi, list):
+            candidates.extend(x for x in multi if isinstance(x, dict))
+
+        for article in candidates:
+            title = str(article.get("title") or "").strip()
+            link = _normalize_wechat_url(article.get("content_url") or "")
+            if not title or not link:
+                continue
+            cover = _normalize_wechat_url(article.get("cover") or "")
+            result.append(
+                {
+                    "guid": link,
+                    "title": title,
+                    "description": str(article.get("digest") or "").strip(),
+                    "author": account_name,
+                    "publish_at": publish_at,
+                    "url": link,
+                    "sogou_url": url,
+                    "cover_url": cover,
+                    "fetched_at": int(time.time()),
+                }
+            )
+
+    result.sort(key=lambda x: int(x.get("publish_at") or 0), reverse=True)
+    return result
+
+
 def fetch_sogou(query: str) -> tuple[list[dict], str, str]:
     session = requests.Session()
     session.headers.update(
@@ -367,6 +454,8 @@ def fetch_sogou(query: str) -> tuple[list[dict], str, str]:
 
         author_node = node.select_one("span.all-time-y2")
         author = author_node.get_text(" ", strip=True) if author_node else ""
+        author_anchor = author_node.find_parent("a") if author_node else None
+        profile_url = str(author_anchor.get("href") or "").strip() if author_anchor else ""
         if author and not account_name:
             account_name = author
 
@@ -384,12 +473,32 @@ def fetch_sogou(query: str) -> tuple[list[dict], str, str]:
                 "publish_at": publish_at,
                 "url": link,
                 "sogou_url": urljoin(SOGOU_HOST, href),
+                "profile_url": profile_url,
                 "fetched_at": int(time.time()),
             }
         )
 
     if not items:
         raise RuntimeError("搜狗微信页面已返回，但没有解析到有效文章")
+
+    # A keyword search can include other accounts merely mentioning the query.
+    # When at least one exact author match exists, use the account's own result
+    # and, when available, expand its public history page into recent posts.
+    expected = _norm_author(query)
+    exact_items = [
+        item for item in items
+        if _norm_author(str(item.get("author") or "")) == expected
+    ]
+    if exact_items:
+        profile_url = next(
+            (str(item.get("profile_url") or "") for item in exact_items if item.get("profile_url")),
+            "",
+        )
+        history = fetch_profile_history(session, profile_url, exact_items[0]["author"])
+        if history:
+            return history, exact_items[0]["author"], response.url
+        return exact_items, exact_items[0]["author"], response.url
+
     return items, account_name or query, response.url
 
 
@@ -405,7 +514,24 @@ def load_old_items(slug: str) -> list[dict]:
         return []
 
 
-def merge_items(new_items: list[dict], old_items: list[dict]) -> list[dict]:
+def merge_items(
+    new_items: list[dict],
+    old_items: list[dict],
+    expected_author: str = "",
+) -> list[dict]:
+    if expected_author:
+        expected = _norm_author(expected_author)
+        exact_new = [
+            item for item in new_items
+            if _norm_author(str(item.get("author") or "")) == expected
+        ]
+        if exact_new:
+            new_items = exact_new
+            old_items = [
+                item for item in old_items
+                if _norm_author(str(item.get("author") or "")) == expected
+            ]
+
     merged: dict[str, dict] = {}
     for item in old_items + new_items:
         key = str(item.get("guid") or "").strip()
@@ -552,7 +678,7 @@ def main() -> int:
             new_items, detected_name, search_url = fetch_sogou(query)
             if not display:
                 parsed_name = detected_name
-            items = merge_items(new_items, old_items)
+            items = merge_items(new_items, old_items, expected_author=query)
             print(f"[sync] {query}: +{len(new_items)} fetched, {len(items)} stored")
         except Exception as exc:
             status = "blocked"
