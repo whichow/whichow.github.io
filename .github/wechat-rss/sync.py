@@ -829,6 +829,12 @@ def main() -> int:
             if REDFOX_API_KEY:
                 try:
                     new_items, detected_name, search_url = fetch_redfox(query, source)
+                    # Once RedFox succeeds, drop legacy Sogou-only cache entries so
+                    # the feed stays a clean exact-account feed.
+                    old_items = [
+                        item for item in old_items
+                        if str(item.get("source") or "") == "redfox"
+                    ]
                     source["last_backend"] = "redfox"
                     save_sources(sources)
                 except Exception as redfox_exc:
