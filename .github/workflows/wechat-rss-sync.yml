@@ -6,35 +6,33 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "可选：粘贴一篇公众号文章链接或 MP_WXS_<数字>，留空则只同步已有公众号"
+        description: "可选：公众号准确名称或微信号；留空则同步已有订阅"
         required: false
         type: string
       name:
-        description: "可选：公众号显示名称"
+        description: "可选：自定义显示名称"
         required: false
         type: string
 
 permissions:
   contents: write
-  actions: read
 
 concurrency:
-  group: wechat-rss-state
+  group: wechat-rss-sogou
   cancel-in-progress: false
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 12
     env:
-      GH_TOKEN: ${{ github.token }}
       ADD_SOURCE: ${{ inputs.source }}
       ADD_NAME: ${{ inputs.name }}
-      WEREAD_MIN_INTERVAL: "5"
-      RSS_LIMIT: "50"
+      MAX_ITEMS: "120"
+      REQUEST_TIMEOUT: "20"
 
     steps:
-      - name: Checkout site repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -44,44 +42,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Checkout pinned WechRss core
-        shell: bash
-        run: |
-          rm -rf .vendor/wechrss
-          mkdir -p .vendor/wechrss
-          git init .vendor/wechrss
-          git -C .vendor/wechrss remote add origin https://github.com/johamwon/wechrss.git
-          git -C .vendor/wechrss fetch --depth 1 origin a99675f7ef1f3d457991d441a9124d3f6666bd45
-          git -C .vendor/wechrss checkout --detach FETCH_HEAD
+      - name: Install lightweight dependencies
+        run: python -m pip install requests beautifulsoup4
 
-      - name: Install dependencies
-        run: python -m pip install -r .vendor/wechrss/requirements.txt
-
-      - name: Install Chromium only when adding a URL source
-        if: ${{ startsWith(inputs.source, 'http://') || startsWith(inputs.source, 'https://') }}
-        run: python -m playwright install --with-deps chromium
-
-      - name: Restore latest private state artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .state
-          ARTIFACT_ID="$(
-            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=wechat-rss-state&per_page=100"               --jq '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | reverse | .[0].id // empty'
-          )"
-          if [ -z "${ARTIFACT_ID}" ]; then
-            echo "::error::没有找到登录状态。请先运行 WeChat RSS Login 工作流并完成微信扫码。"
-            exit 3
-          fi
-          curl -fL             -H "Authorization: Bearer ${GH_TOKEN}"             -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip"             -o /tmp/wechat-rss-state.zip
-          unzip -qo /tmp/wechat-rss-state.zip -d .state
-          test -s .state/credentials.json
-          test -s .state/wechat_mp.db
-
-      - name: Sync feeds and generate static site
+      - name: Sync public WeChat search results
         run: python .github/wechat-rss/sync.py
 
-      - name: Publish static RSS files
+      - name: Commit generated feeds
         shell: bash
         run: |
           set -euo pipefail
@@ -89,19 +56,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add wechat-rss
           if git diff --cached --quiet; then
-            echo "No public changes."
+            echo "No changes."
             exit 0
           fi
           git commit -m "chore: update WeChat RSS [skip ci]"
           git pull --rebase
           git push
-
-      - name: Save refreshed private state
-        uses: actions/upload-artifact@v4
-        with:
-          name: wechat-rss-state
-          path: |
-            .state/credentials.json
-            .state/wechat_mp.db
-          retention-days: 90
-          include-hidden-files: true
