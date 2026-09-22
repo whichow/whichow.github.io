@@ -4,12 +4,13 @@ on:
   push:
     paths:
       - ".github/workflows/wechat-rss-sync.yml"
+      - "wechat-rss/sources.json"
   schedule:
     - cron: "23 */6 * * *"
   workflow_dispatch:
     inputs:
       source:
-        description: "可选：公众号准确名称或微信号；留空则同步已有订阅"
+        description: "可选：公众号文章链接、准确名称或微信号；留空则同步已有订阅"
         required: false
         type: string
       name:
