@@ -34,6 +34,7 @@ jobs:
       ADD_NAME: ${{ inputs.name }}
       MAX_ITEMS: "120"
       REQUEST_TIMEOUT: "20"
+      REDFOX_API_KEY: ${{ secrets.REDFOX_API_KEY }}
 
     steps:
       - name: Checkout
