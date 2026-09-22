@@ -9,7 +9,8 @@
       "seed_title": "微信公众平台",
       "resolved_from": "https://mp.weixin.qq.com/s/wdi6wNrU2-dKg-DI09ml8Q",
       "sync_mode": "exact-author+public-history+stable-dedupe",
-      "last_backend": "sogou"
+      "last_backend": "sogou",
+      "backend_preference": "redfox"
     }
   ]
 }
