@@ -1,4 +1,5 @@
 name: WeChat RSS Sync
+# RedFox backend validated
 
 on:
   push:
