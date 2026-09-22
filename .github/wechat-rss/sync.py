@@ -149,8 +149,8 @@ def resolve_article_source(url: str) -> tuple[str, str]:
         if meta and meta.get("content"):
             title = str(meta.get("content") or "").strip()
 
-    if not account_name:
-        raise RuntimeError("已打开微信文章，但公开页面里没有解析到公众号名称")
+    if not account_name and not title:
+        raise RuntimeError("已打开微信文章，但公开页面里没有解析到公众号名称或文章标题")
     return account_name, title
 
 
@@ -168,11 +168,35 @@ def normalize_source(source: dict) -> tuple[str, str]:
 
     if not query and seed_url:
         account_name, article_title = resolve_article_source(seed_url)
+        if article_title:
+            source["seed_title"] = article_title
+
+        # Some current WeChat permanent-link pages expose the article title but
+        # no account nickname in the static HTML. In that case use the public
+        # Sogou article search once to recover the author/account name, then
+        # persist that account name for all future scheduled syncs.
+        if not account_name and article_title:
+            seed_items, detected_name, _ = fetch_sogou(article_title)
+            exact = next(
+                (
+                    item for item in seed_items
+                    if str(item.get("title") or "").strip() == article_title.strip()
+                    and str(item.get("author") or "").strip()
+                ),
+                None,
+            )
+            account_name = (
+                str(exact.get("author") or "").strip()
+                if exact
+                else str(detected_name or "").strip()
+            )
+
+        if not account_name:
+            raise RuntimeError("能打开文章，但无法从公开页面或搜狗公开检索识别公众号名称")
+
         query = account_name
         source["query"] = query
         source["resolved_from"] = seed_url
-        if article_title:
-            source["seed_title"] = article_title
         if not display:
             source["name"] = account_name
             display = account_name
