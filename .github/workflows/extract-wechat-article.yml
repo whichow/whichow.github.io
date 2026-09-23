@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   extract:
-    if: ${{ hashFiles('.github/article-extract-request.json') != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
