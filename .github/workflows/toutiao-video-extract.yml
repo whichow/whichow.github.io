@@ -1,21 +1,38 @@
-name: Extract Toutiao video 7688644560120971315
+name: Toutiao Video Extractor
 
 on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Toutiao short link or /video/ URL"
+        required: true
+        type: string
+  repository_dispatch:
+    types: [extract_toutiao_video]
+  workflow_call:
+    inputs:
+      url:
+        description: "Toutiao short link or /video/ URL"
+        required: true
+        type: string
   push:
     branches:
       - toutiao-video-extract-7688644560120971315
     paths:
       - "tools/toutiao_video_extract.py"
       - ".github/workflows/toutiao-video-extract.yml"
-  workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  TOUTIAO_URL: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.url || inputs.url || 'https://m.toutiao.com/is/pso4hdMSQQI/' }}
 
 jobs:
   extract:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,30 +42,29 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install extraction dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests curl_cffi yt-dlp
-
-      - name: Install ffmpeg
-        run: |
+          pip install requests curl_cffi yt-dlp faster-whisper
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
 
-      - name: Extract video page and media
+      - name: Extract real Toutiao video
         id: extract
         continue-on-error: true
+        shell: bash
         run: |
           rm -rf output
           mkdir -p output
-          python tools/toutiao_video_extract.py "https://m.toutiao.com/is/pso4hdMSQQI/" --out output
-          echo "---- result.json ----"
+          echo "Input: $TOUTIAO_URL"
+          python tools/toutiao_video_extract.py "$TOUTIAO_URL" --out output
           cat output/result.json || true
           ls -lah output || true
 
       - name: yt-dlp fallback
         if: always()
         continue-on-error: true
+        shell: bash
         run: |
           if [ ! -s output/video.mp4 ]; then
             yt-dlp \
@@ -60,13 +76,14 @@ jobs:
               --sub-langs "zh.*,en.*" \
               --merge-output-format mp4 \
               -o "output/video.%(ext)s" \
-              "https://www.toutiao.com/video/7688644560120971315/" || true
+              "$TOUTIAO_URL" || true
           fi
           ls -lah output || true
 
-      - name: Prepare audio
+      - name: Extract audio
         if: always()
         continue-on-error: true
+        shell: bash
         run: |
           VID="$(find output -maxdepth 1 -type f \( -name 'video.mp4' -o -name 'video.webm' -o -name 'video.mkv' \) | head -n1)"
           if [ -n "$VID" ]; then
@@ -74,12 +91,12 @@ jobs:
           fi
           ls -lah output || true
 
-      - name: Transcribe actual audio with faster-whisper
+      - name: Transcribe actual audio
         if: always()
         continue-on-error: true
+        shell: bash
         run: |
           if [ -s output/audio.wav ]; then
-            pip install faster-whisper
             cat > /tmp/transcribe.py <<'PY'
           import json
           from pathlib import Path
@@ -94,20 +111,30 @@ jobs:
               vad_filter=True,
               condition_on_previous_text=True,
           )
+
           rows = []
           lines = []
           for s in segments:
               text = s.text.strip()
-              rows.append({"start": round(s.start, 3), "end": round(s.end, 3), "text": text})
+              rows.append({
+                  "start": round(s.start, 3),
+                  "end": round(s.end, 3),
+                  "text": text,
+              })
               lines.append(f"[{s.start:8.2f} - {s.end:8.2f}] {text}")
+
           Path("output/transcript.txt").write_text("\n".join(lines), encoding="utf-8")
           Path("output/transcript.json").write_text(
-              json.dumps({
-                  "language": info.language,
-                  "language_probability": info.language_probability,
-                  "duration": info.duration,
-                  "segments": rows,
-              }, ensure_ascii=False, indent=2),
+              json.dumps(
+                  {
+                      "language": info.language,
+                      "language_probability": info.language_probability,
+                      "duration": info.duration,
+                      "segments": rows,
+                  },
+                  ensure_ascii=False,
+                  indent=2,
+              ),
               encoding="utf-8",
           )
           print("\n".join(lines))
@@ -115,21 +142,48 @@ jobs:
             python /tmp/transcribe.py
           fi
 
-      - name: Final diagnostics
+      - name: Write run summary
         if: always()
+        shell: bash
         run: |
-          echo "===== FILES ====="
-          find output -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
-          echo "===== RESULT ====="
-          cat output/result.json || true
-          echo "===== TRANSCRIPT ====="
-          cat output/transcript.txt || true
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+
+          result_path = Path("output/result.json")
+          transcript_path = Path("output/transcript.txt")
+
+          print("# Toutiao extraction")
+          if result_path.exists():
+              result = json.loads(result_path.read_text(encoding="utf-8"))
+              print(f"- Video ID: {result.get('video_id', '')}")
+              print(f"- Title: {result.get('title', '')}")
+              dl = result.get("download") or {}
+              print(f"- Media type: {dl.get('content_type', '')}")
+              print(f"- Downloaded bytes: {dl.get('bytes', '')}")
+              print(f"- Errors: {len(result.get('errors') or [])}")
+          if transcript_path.exists():
+              text_value = transcript_path.read_text(encoding="utf-8")
+              print("\n## Transcript preview\n")
+              print("~~~text")
+              print(text_value[:4000])
+              print("~~~")
+          PY
+
+      - name: Validate output
+        if: always()
+        shell: bash
+        run: |
+          test -s output/result.json
+          test -s output/video.mp4
+          test -s output/transcript.txt
+          echo "Extraction validated."
 
       - name: Upload extraction artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: toutiao-7688644560120971315
+          name: toutiao-extract-${{ github.run_id }}
           path: output/
-          if-no-files-found: warn
-          retention-days: 3
+          if-no-files-found: error
+          retention-days: 7
