@@ -15,13 +15,6 @@ on:
         description: "Toutiao short link or /video/ URL"
         required: true
         type: string
-  push:
-    branches:
-      - toutiao-video-extract-7688644560120971315
-    paths:
-      - "tools/toutiao_video_extract.py"
-      - ".github/workflows/toutiao-video-extract.yml"
-
 permissions:
   contents: read
 
