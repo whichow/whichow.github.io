@@ -1,0 +1,55 @@
+name: Validate MiniMax H3 RTX5080 workflows
+
+on:
+  push:
+    branches:
+      - minimax-h3-rtx5080-8step-sage
+    paths:
+      - "minimax-h3-rtx5080/**"
+      - ".github/workflows/validate-minimax-h3-rtx5080.yml"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate workflow JSON and required settings
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("minimax-h3-rtx5080/workflows")
+          safe = json.loads((root / "H3_RTX5080_8step_SAFE.json").read_text(encoding="utf-8"))
+          sage = json.loads((root / "H3_RTX5080_8step_SAGE_EXPERIMENTAL.json").read_text(encoding="utf-8"))
+
+          def check_common(d):
+              res = next(n for n in d["nodes"] if n["id"] == 115)
+              assert res["widgets_values_named"]["aspect_ratio"] == "16:9 (Widescreen)"
+              assert res["widgets_values_named"]["megapixels"] == 0.4
+              sg = next(n for n in d["nodes"] if n["id"] == 105)
+              assert sg["widgets_values_named"]["value"] is True
+              assert sg["widgets_values_named"]["value_2"] == 8
+              assert sg["widgets_values_named"]["lora_name"] == "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors"
+              sub = d["definitions"]["subgraphs"][0]
+              return sub
+
+          ssub = check_common(safe)
+          xsub = check_common(sage)
+
+          assert not any(n["type"] == "PathchSageAttentionKJ" for n in ssub["nodes"])
+          patch = next(n for n in xsub["nodes"] if n["type"] == "PathchSageAttentionKJ")
+          assert patch["widgets_values_named"]["sage_attention"] == "sageattn_qk_int8_pv_fp16_cuda"
+          assert patch["widgets_values_named"]["allow_compile"] is False
+
+          links = {l["id"]: l for l in xsub["links"]}
+          assert links[246]["origin_id"] == 122 and links[246]["target_id"] == 127
+          assert links[234]["origin_id"] == 127
+          assert links[241]["origin_id"] == 127
+
+          print("MiniMax H3 RTX5080 workflows: VALID")
+          PY
