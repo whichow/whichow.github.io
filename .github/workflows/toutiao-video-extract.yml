@@ -1,0 +1,135 @@
+name: Extract Toutiao video 7688644560120971315
+
+on:
+  push:
+    branches:
+      - toutiao-video-extract-7688644560120971315
+    paths:
+      - "tools/toutiao_video_extract.py"
+      - ".github/workflows/toutiao-video-extract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install extraction dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests curl_cffi yt-dlp
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
+
+      - name: Extract video page and media
+        id: extract
+        continue-on-error: true
+        run: |
+          rm -rf output
+          mkdir -p output
+          python tools/toutiao_video_extract.py "https://m.toutiao.com/is/pso4hdMSQQI/" --out output
+          echo "---- result.json ----"
+          cat output/result.json || true
+          ls -lah output || true
+
+      - name: yt-dlp fallback
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ ! -s output/video.mp4 ]; then
+            yt-dlp \
+              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36" \
+              --referer "https://www.toutiao.com/" \
+              --no-playlist \
+              --write-info-json \
+              --write-auto-subs \
+              --sub-langs "zh.*,en.*" \
+              --merge-output-format mp4 \
+              -o "output/video.%(ext)s" \
+              "https://www.toutiao.com/video/7688644560120971315/" || true
+          fi
+          ls -lah output || true
+
+      - name: Prepare audio
+        if: always()
+        continue-on-error: true
+        run: |
+          VID="$(find output -maxdepth 1 -type f \( -name 'video.mp4' -o -name 'video.webm' -o -name 'video.mkv' \) | head -n1)"
+          if [ -n "$VID" ]; then
+            ffmpeg -y -i "$VID" -vn -ac 1 -ar 16000 -c:a pcm_s16le output/audio.wav
+          fi
+          ls -lah output || true
+
+      - name: Transcribe actual audio with faster-whisper
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -s output/audio.wav ]; then
+            pip install faster-whisper
+            cat > /tmp/transcribe.py <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+
+          audio = "output/audio.wav"
+          model = WhisperModel("small", device="cpu", compute_type="int8")
+          segments, info = model.transcribe(
+              audio,
+              language="zh",
+              beam_size=5,
+              vad_filter=True,
+              condition_on_previous_text=True,
+          )
+          rows = []
+          lines = []
+          for s in segments:
+              text = s.text.strip()
+              rows.append({"start": round(s.start, 3), "end": round(s.end, 3), "text": text})
+              lines.append(f"[{s.start:8.2f} - {s.end:8.2f}] {text}")
+          Path("output/transcript.txt").write_text("\n".join(lines), encoding="utf-8")
+          Path("output/transcript.json").write_text(
+              json.dumps({
+                  "language": info.language,
+                  "language_probability": info.language_probability,
+                  "duration": info.duration,
+                  "segments": rows,
+              }, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          print("\n".join(lines))
+          PY
+            python /tmp/transcribe.py
+          fi
+
+      - name: Final diagnostics
+        if: always()
+        run: |
+          echo "===== FILES ====="
+          find output -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+          echo "===== RESULT ====="
+          cat output/result.json || true
+          echo "===== TRANSCRIPT ====="
+          cat output/transcript.txt || true
+
+      - name: Upload extraction artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toutiao-7688644560120971315
+          path: output/
+          if-no-files-found: warn
+          retention-days: 3
