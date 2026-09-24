@@ -165,6 +165,107 @@ def walk(obj: Any, path: tuple[str, ...] = ()):
                 yield from walk(nested, path + ("<json>",))
 
 
+
+def fetch_vod_play_info(session, data: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """Use Toutiao's own playAuthTokenV2 to request the signed VOD play list."""
+    if not isinstance(data, dict):
+        return None, None
+    article = data.get("articleInfo")
+    if not isinstance(article, dict):
+        return None, None
+    token_b64 = article.get("playAuthTokenV2")
+    if not isinstance(token_b64, str) or not token_b64:
+        return None, None
+
+    try:
+        pad = "=" * ((4 - len(token_b64) % 4) % 4)
+        auth = json.loads(base64.b64decode(token_b64 + pad).decode("utf-8"))
+        query = auth["GetPlayInfoToken"]
+        endpoint = "https://vod.bytedanceapi.com/?" + query + "&ssl=true"
+        headers = {
+            "User-Agent": UA_DESKTOP,
+            "Referer": "https://www.toutiao.com/",
+            "Accept": "application/json,text/plain,*/*",
+        }
+        kwargs = dict(headers=headers, timeout=40, allow_redirects=True)
+        if crequests is not None and session.__class__.__module__.startswith("curl_cffi"):
+            kwargs["impersonate"] = "chrome"
+        r = session.get(endpoint, **kwargs)
+        r.raise_for_status()
+        return r.json(), endpoint
+    except Exception:
+        return None, None
+
+
+def extract_vod_media(play_info: Any) -> list[dict[str, str]]:
+    """Extract real VOD media URLs from Result.Data.PlayInfoList."""
+    out: list[dict[str, str]] = []
+    if not isinstance(play_info, dict):
+        return out
+
+    node = play_info
+    for key in ("Result", "Data"):
+        if isinstance(node, dict) and key in node:
+            node = node[key]
+        else:
+            node = None
+            break
+
+    items = node.get("PlayInfoList") if isinstance(node, dict) else None
+    if not isinstance(items, list):
+        # Fallback recursive search for PlayInfoList if response shape changes.
+        stack = [play_info]
+        while stack and items is None:
+            cur = stack.pop()
+            if isinstance(cur, dict):
+                if isinstance(cur.get("PlayInfoList"), list):
+                    items = cur["PlayInfoList"]
+                    break
+                stack.extend(cur.values())
+            elif isinstance(cur, list):
+                stack.extend(cur)
+
+    if not isinstance(items, list):
+        return out
+
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        definition = str(item.get("Definition") or "")
+        fmt = str(item.get("Format") or "")
+        for field in ("MainPlayUrl", "BackupPlayUrl"):
+            raw = item.get(field)
+            if not isinstance(raw, str) or not raw:
+                continue
+            url = maybe_base64_url(raw) or raw.replace("\\/", "/")
+            if url.startswith(("http://", "https://")):
+                out.append({
+                    "path": f"vod.PlayInfoList.{idx}.{field}.{definition}.{fmt}",
+                    "url": url,
+                })
+
+    def qscore(entry: dict[str, str]) -> int:
+        s = (entry["path"] + " " + entry["url"]).lower()
+        score = 0
+        if "1080" in s:
+            score += 50
+        elif "720" in s:
+            score += 40
+        elif "540" in s:
+            score += 30
+        elif "480" in s:
+            score += 20
+        elif "360" in s:
+            score += 10
+        if "mainplayurl" in s:
+            score += 5
+        if "mp4" in s:
+            score += 3
+        return score
+
+    out.sort(key=qscore, reverse=True)
+    return out
+
 def collect(data: Any, page: str) -> dict[str, Any]:
     media: list[dict[str, str]] = []
     titles: list[tuple[str, str]] = []
@@ -185,11 +286,12 @@ def collect(data: Any, page: str) -> dict[str, Any]:
                     low_path = pstr.lower()
                     if (
                         MEDIA_EXT_RE.search(u)
-                        or "video" in low_path
+                        or "mainplayurl" in low_path
+                        or "backupplayurl" in low_path
                         or "main_url" in low_path
                         or "backup_url" in low_path
-                        or "video" in u.lower()
-                        or "tos-" in u.lower()
+                        or "playurllist" in low_path
+                        or "video_list" in low_path
                     ):
                         seen.add(u)
                         media.append({"path": pstr, "url": u})
@@ -260,6 +362,9 @@ def download_media(session, url: str, dest: Path) -> dict[str, Any]:
         kwargs["impersonate"] = "chrome"
     r = session.get(url, **kwargs)
     r.raise_for_status()
+    content_type = (r.headers.get("content-type", "") or "").lower()
+    if content_type.startswith("image/") or content_type.startswith("text/html"):
+        raise ValueError(f"not a video response: content-type={content_type}")
     total = 0
     with dest.open("wb") as f:
         for chunk in r.iter_content(chunk_size=1024 * 1024):
@@ -269,7 +374,7 @@ def download_media(session, url: str, dest: Path) -> dict[str, Any]:
     return {
         "method": "http",
         "status": r.status_code,
-        "content_type": r.headers.get("content-type", ""),
+        "content_type": content_type,
         "content_length": r.headers.get("content-length", ""),
         "bytes": total,
         "final_url": str(r.url),
@@ -334,6 +439,19 @@ def main() -> int:
                 json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
             )
         collection = collect(data, page)
+        play_info, play_info_endpoint = fetch_vod_play_info(session, data)
+        if play_info is not None:
+            safe_name = name.replace(".html", "")
+            (out / f"{safe_name}.vod_play_info.json").write_text(
+                json.dumps(play_info, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            vod_media = extract_vod_media(play_info)
+            collection["media_candidates"] = vod_media + collection["media_candidates"]
+            report.setdefault("vod_play_info", []).append({
+                "source": name,
+                "endpoint": play_info_endpoint,
+                "media_count": len(vod_media),
+            })
         if best_collection is None or len(collection["media_candidates"]) > len(best_collection["media_candidates"]):
             best_collection = collection
 
@@ -357,6 +475,8 @@ def main() -> int:
                 report["download"] = dl
                 if video_path.exists() and video_path.stat().st_size > 1024 * 100:
                     break
+                if video_path.exists():
+                    video_path.unlink(missing_ok=True)
             except Exception as e:
                 report["errors"].append(f"download candidate {idx} failed: {type(e).__name__}: {e}")
                 try:
