@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   extract:
@@ -47,6 +47,23 @@ jobs:
           cat output/result.json || true
           echo "===== ARTICLE ====="
           cat output/article.md || true
+
+      - name: Persist extraction result to branch
+        if: always()
+        run: |
+          mkdir -p extracted/toutiao-h3-66s
+          cp -f output/result.json extracted/toutiao-h3-66s/result.json 2>/dev/null || true
+          cp -f output/article.md extracted/toutiao-h3-66s/article.md 2>/dev/null || true
+          cp -f output/shortlink_response.html extracted/toutiao-h3-66s/shortlink_response.html 2>/dev/null || true
+          cp -f output/article_desktop.html extracted/toutiao-h3-66s/article_desktop.html 2>/dev/null || true
+          cp -f output/article_mobile.html extracted/toutiao-h3-66s/article_mobile.html 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add extracted/toutiao-h3-66s
+          if ! git diff --cached --quiet; then
+            git commit -m "Persist Toutiao H3 article extraction result"
+            git push origin HEAD:toutiao-article-extract-h3-66s
+          fi
 
       - name: Upload extraction artifact
         if: always()
