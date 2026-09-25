@@ -1,0 +1,5 @@
+Scene: a single red fox in a snow-covered pine forest at dawn.
+Action: the fox walks steadily left to right and looks toward the camera once.
+Camera: medium-height lateral tracking shot, stable framing.
+Look: photorealistic fur, cold blue ambient light, warm sunrise rim light.
+Audio: soft footsteps in snow, light wind through pine branches, no music.
