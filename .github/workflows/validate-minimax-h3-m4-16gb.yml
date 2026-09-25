@@ -1,0 +1,85 @@
+name: Validate MiniMax H3 M4 16GB deploy
+
+on:
+  push:
+    branches:
+      - minimax-h3-m4-16gb-ane
+    paths:
+      - "minimax-h3-m4-16gb/**"
+      - ".github/workflows/validate-minimax-h3-m4-16gb.yml"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate Python
+        run: |
+          python -m py_compile \
+            minimax-h3-m4-16gb/mac/download_mac_models.py \
+            minimax-h3-m4-16gb/windows/download_conditioner_assets.py
+
+      - name: Validate zsh
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y zsh
+          zsh -n minimax-h3-m4-16gb/mac/setup_mac.sh
+          zsh -n minimax-h3-m4-16gb/mac/smoke_test.sh
+          zsh -n minimax-h3-m4-16gb/mac/render_4s.sh
+          zsh -n minimax-h3-m4-16gb/mac/cleanup_ane_cache.sh
+
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $files = @(
+            "minimax-h3-m4-16gb/windows/setup_conditioner.ps1",
+            "minimax-h3-m4-16gb/windows/mint_conditioning.ps1"
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              throw "PowerShell parse failed: $file"
+            }
+          }
+
+      - name: Validate expected deployment contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          mac = Path("minimax-h3-m4-16gb/mac/download_mac_models.py").read_text()
+          assert "minimax_h3_fl2va_pruned_int8_convrot.safetensors" in mac
+          assert "minimax_h3_video_vae_fp16.safetensors" in mac
+          assert "minimax_h3_audio_vae_fp32.safetensors" in mac
+          assert "qwen3vl_32b_minimax_h3_bf16.safetensors" not in mac
+
+          smoke = Path("minimax-h3-m4-16gb/mac/smoke_test.sh").read_text()
+          assert "H3_ANE_FULL_BLOCKS=50" in smoke
+          assert "H3_ANE_ROTATE=1" in smoke
+          assert "--ssd-streaming" in smoke
+          assert "--width 256 --height 256" in smoke
+
+          full = Path("minimax-h3-m4-16gb/mac/render_4s.sh").read_text()
+          assert "--width 512 --height 512" in full
+          assert "--render-width 384 --render-height 384" in full
+          assert "--seconds 4 --steps 6" in full
+
+          win = Path("minimax-h3-m4-16gb/windows/download_conditioner_assets.py").read_text()
+          assert "qwen3vl_32b_minimax_h3_bf16.safetensors" in win
+
+          print("M4 16GB split-deployment files: VALID")
+          PY
