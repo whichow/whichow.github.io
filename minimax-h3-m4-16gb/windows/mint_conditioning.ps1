@@ -3,7 +3,7 @@ param(
   [string]$Root = "$env:USERPROFILE\MiniMax-H3-Conditioner",
   [string]$PythonExe = "python",
   [string]$Out = "",
-  [string]$MacTarget = ""
+  [string]$MacTargetDir = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,14 +36,18 @@ $Mint = Join-Path $Runtime "scripts\mint_h3_conditioning.py"
 & $PythonExe $Mint --prompt $Prompt --te $TE --tokenizer $Tokenizer --device cuda --out $Out
 if ($LASTEXITCODE -ne 0) { throw "Conditioning mint failed." }
 
+$PromptFile = "$Out.prompt.txt"
+[System.IO.File]::WriteAllText($PromptFile, $Prompt, [System.Text.UTF8Encoding]::new($false))
+
 Write-Host
 Write-Host "Created: $Out"
+Write-Host "Prompt sidecar: $PromptFile"
 
-if (-not [string]::IsNullOrWhiteSpace($MacTarget)) {
+if (-not [string]::IsNullOrWhiteSpace($MacTargetDir)) {
   if (-not (Get-Command scp -ErrorAction SilentlyContinue)) {
-    throw "scp not found. Install the Windows OpenSSH Client or copy the .h3cd manually."
+    throw "scp not found. Install the Windows OpenSSH Client or copy the files manually."
   }
-  Write-Host "Copying to Mac: $MacTarget"
-  scp $Out $MacTarget
+  Write-Host "Copying conditioning + prompt sidecar to Mac: $MacTargetDir"
+  scp $Out $PromptFile $MacTargetDir
   if ($LASTEXITCODE -ne 0) { throw "scp failed." }
 }
