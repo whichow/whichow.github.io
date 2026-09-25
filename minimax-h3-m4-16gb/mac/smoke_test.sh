@@ -19,6 +19,20 @@ if [[ ! -s "$COND" ]]; then
   echo "ERROR: conditioning file not found: $COND"
   exit 3
 fi
+PROMPT_FILE="${COND}.prompt.txt"
+if [[ -s "$PROMPT_FILE" ]]; then
+  EXPECTED_PROMPT="$(cat "$PROMPT_FILE")"
+  if [[ "$EXPECTED_PROMPT" != "$PROMPT" ]]; then
+    echo "ERROR: prompt does not match the .h3cd sidecar."
+    echo "The conditioning tensor is prompt-specific."
+    echo "Expected: $EXPECTED_PROMPT"
+    echo "Received: $PROMPT"
+    exit 5
+  fi
+else
+  echo "WARNING: no prompt sidecar found at $PROMPT_FILE"
+  echo "Make sure the prompt exactly matches the one used to mint the .h3cd file."
+fi
 if [[ ! -x "$RUNTIME/h3" ]]; then
   echo "ERROR: h3 runtime missing. Run setup_mac.sh first."
   exit 4
