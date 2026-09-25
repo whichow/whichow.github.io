@@ -1,0 +1,210 @@
+name: Douyin Video Extractor
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Douyin short link or /video/ URL"
+        required: false
+        type: string
+  repository_dispatch:
+    types: [extract_douyin_video]
+  push:
+    paths:
+      - "requests/douyin-current-url.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests curl_cffi yt-dlp faster-whisper
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
+
+      - name: Resolve input URL
+        id: input
+        shell: bash
+        env:
+          INPUT_URL: ${{ inputs.url || '' }}
+          DISPATCH_URL: ${{ github.event.client_payload.url || '' }}
+        run: |
+          URL="$INPUT_URL"
+          if [ -z "$URL" ]; then URL="$DISPATCH_URL"; fi
+          if [ -z "$URL" ] && [ -s requests/douyin-current-url.txt ]; then
+            URL="$(head -n1 requests/douyin-current-url.txt | tr -d '\r\n')"
+          fi
+          if [ -z "$URL" ]; then
+            echo "No URL supplied" >&2
+            exit 2
+          fi
+          echo "URL=$URL" >> "$GITHUB_ENV"
+          echo "Input: $URL"
+
+      - name: Extract real Douyin video
+        id: extract
+        continue-on-error: true
+        shell: bash
+        run: |
+          rm -rf output
+          mkdir -p output
+          python tools/douyin_video_extract.py "$URL" --out output
+          cat output/result.json || true
+          ls -lah output || true
+
+      - name: Last yt-dlp fallback
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ ! -s output/video.mp4 ]; then
+            yt-dlp               --no-playlist               --write-info-json               --merge-output-format mp4               -f "bv*+ba/b"               -o "output/video.%(ext)s"               "$URL" || true
+          fi
+          ls -lah output || true
+
+      - name: Normalize video
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ ! -s output/video.mp4 ]; then
+            VID="$(find output -maxdepth 1 -type f \( -name 'video.webm' -o -name 'video.mkv' -o -name 'video.mov' \) | head -n1)"
+            if [ -n "$VID" ]; then
+              ffmpeg -y -i "$VID" -c copy output/video.mp4 ||               ffmpeg -y -i "$VID" -c:v libx264 -c:a aac output/video.mp4
+            fi
+          fi
+
+      - name: Extract audio
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ -s output/video.mp4 ]; then
+            ffmpeg -y -i output/video.mp4 -vn -ac 1 -ar 16000 -c:a pcm_s16le output/audio.wav
+          fi
+
+      - name: Transcribe actual audio
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ -s output/audio.wav ]; then
+            cat > /tmp/transcribe.py <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+
+          model = WhisperModel("small", device="cpu", compute_type="int8")
+          segments, info = model.transcribe(
+              "output/audio.wav",
+              language="zh",
+              beam_size=5,
+              vad_filter=True,
+              condition_on_previous_text=True,
+          )
+          rows, lines = [], []
+          for s in segments:
+              t = s.text.strip()
+              rows.append({"start": round(s.start, 3), "end": round(s.end, 3), "text": t})
+              lines.append(f"[{s.start:8.2f} - {s.end:8.2f}] {t}")
+          Path("output/transcript.txt").write_text("\n".join(lines), encoding="utf-8")
+          Path("output/transcript.json").write_text(json.dumps({
+              "language": info.language,
+              "language_probability": info.language_probability,
+              "duration": info.duration,
+              "segments": rows,
+          }, ensure_ascii=False, indent=2), encoding="utf-8")
+          print("\n".join(lines))
+          PY
+            python /tmp/transcribe.py
+          fi
+
+      - name: Extract key frames
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ -s output/video.mp4 ]; then
+            mkdir -p output/frames
+            DUR="$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 output/video.mp4 || echo 0)"
+            python - "$DUR" <<'PY' > /tmp/frame_times.txt
+          import sys
+          try:
+              d=float(sys.argv[1])
+          except Exception:
+              d=0
+          if d <= 0:
+              vals=[0]
+          else:
+              n=12
+              vals=[d*i/(n+1) for i in range(1,n+1)]
+          for v in vals:
+              print(f"{v:.3f}")
+          PY
+            i=1
+            while read -r T; do
+              ffmpeg -y -ss "$T" -i output/video.mp4 -frames:v 1 -q:v 2 "output/frames/frame_$(printf '%02d' "$i").jpg" >/dev/null 2>&1 || true
+              i=$((i+1))
+            done < /tmp/frame_times.txt
+          fi
+          find output/frames -type f -maxdepth 1 -print 2>/dev/null || true
+
+      - name: Write run summary
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          rp=Path("output/result.json")
+          tp=Path("output/transcript.txt")
+          print("# Douyin extraction")
+          if rp.exists():
+              r=json.loads(rp.read_text(encoding="utf-8"))
+              print(f"- Aweme ID: {r.get('aweme_id','')}")
+              print(f"- Title: {r.get('title','')}")
+              print(f"- Author: {r.get('author','')}")
+              print(f"- Metadata source: {r.get('metadata_source','')}")
+              dl=r.get("download") or {}
+              print(f"- Video bytes: {dl.get('bytes','')}")
+              print(f"- Errors: {len(r.get('errors') or [])}")
+          if tp.exists():
+              print("\n## Transcript preview\n")
+              print("~~~text")
+              print(tp.read_text(encoding="utf-8")[:6000])
+              print("~~~")
+          PY
+
+      - name: Validate output
+        if: always()
+        shell: bash
+        run: |
+          test -s output/result.json
+          test -s output/video.mp4
+          test -s output/transcript.txt
+          test "$(find output/frames -type f 2>/dev/null | wc -l)" -ge 1
+          echo "Extraction validated."
+
+      - name: Upload extraction artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: douyin-extract-${{ github.run_id }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 7
