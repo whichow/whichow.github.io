@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import html as html_lib
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -129,6 +130,8 @@ def parse_dom(page: str):
     ).strip()
     author = (
         sel.xpath("//div[contains(@class,'article-meta')]//span[contains(@class,'name')]//a/text()").get()
+        or sel.xpath("//span[contains(@class,'author-name')]/text()").get()
+        or sel.xpath('//meta[@property="og:article:author"]/@content').get()
         or sel.xpath('//meta[@name="author"]/@content').get()
         or ""
     ).strip()
@@ -284,6 +287,180 @@ def parse_wechat_images(page: str):
     return _dedupe_urls(images)
 
 
+REDFOX_BASE = os.getenv("REDFOX_BASE_URL", "https://redfox.hk").rstrip("/")
+
+
+def _redfox_post(path: str, payload: dict):
+    key = os.getenv("REDFOX_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("REDFOX_API_KEY not configured")
+    r = requests.post(
+        REDFOX_BASE + path,
+        json=payload,
+        timeout=40,
+        headers={
+            "Content-Type": "application/json",
+            "X-API-Key": key,
+            "REDFOX_API_KEY": key,
+            "User-Agent": UA_DESKTOP,
+        },
+    )
+    r.raise_for_status()
+    data = r.json()
+    if not isinstance(data, dict):
+        raise RuntimeError("RedFox returned non-object")
+    code = int(data.get("code") or 0)
+    if code not in (200, 2000):
+        raise RuntimeError(str(data.get("msg") or data.get("message") or f"RedFox code={code}"))
+    return data.get("data")
+
+
+def _redfox_rows(data):
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("list", "records", "data"):
+            rows = data.get(key)
+            if isinstance(rows, list):
+                return rows
+    return []
+
+
+def _norm_text(value: str) -> str:
+    return re.sub(r"\\s+", "", str(value or "")).casefold()
+
+
+def redfox_article_detail(author: str, title: str):
+    author = str(author or "").strip()
+    title = str(title or "").strip()
+    if not author or not title:
+        raise RuntimeError("missing author/title for RedFox lookup")
+
+    search = _redfox_post(
+        "/story/api/gzh/data/searchUser",
+        {"keyword": author, "offset": 0},
+    )
+    accounts = [x for x in _redfox_rows(search) if isinstance(x, dict)]
+    if not accounts:
+        raise RuntimeError(f"RedFox account not found: {author}")
+
+    an = _norm_text(author)
+    accounts.sort(
+        key=lambda x: (
+            int(_norm_text(x.get("accountName")) == an or _norm_text(x.get("account")) == an or _norm_text(x.get("wxId")) == an),
+            int(_norm_text(x.get("accountName")).startswith(an) or _norm_text(x.get("account")).startswith(an)),
+        ),
+        reverse=True,
+    )
+    account = accounts[0]
+    account_id = str(account.get("account") or "").strip()
+    if not account_id:
+        # Some responses identify the account only by wxId/bizInfo.
+        account_id = str(account.get("wxId") or account.get("bizInfo") or "").strip()
+    if not account_id:
+        raise RuntimeError("RedFox account record has no query identifier")
+
+    target = _norm_text(title)
+    matched = None
+    for offset in range(0, 101, 20):
+        payload = {
+            "source": "Toutiao article extractor",
+            "account": account_id,
+            "sortType": "2",
+            "offset": offset,
+        }
+        listing = _redfox_post("/story/api/gzh/data/queryWorkList", payload)
+        rows = [x for x in _redfox_rows(listing) if isinstance(x, dict)]
+        if not rows:
+            break
+        for row in rows:
+            if _norm_text(row.get("title")) == target:
+                matched = row
+                break
+        if matched:
+            break
+        if len(rows) < 20:
+            break
+
+    if not matched:
+        raise RuntimeError("RedFox did not find exact article title in recent works")
+
+    work_uuid = str(matched.get("workUuid") or matched.get("uuid") or matched.get("id") or "").strip()
+    if not work_uuid:
+        raise RuntimeError("RedFox article has no workUuid")
+
+    detail = _redfox_post(
+        "/story/api/gzh/data/workDetail",
+        {"source": "Toutiao article extractor", "workUuid": work_uuid},
+    )
+    if isinstance(detail, list):
+        detail = detail[0] if detail else {}
+    if not isinstance(detail, dict):
+        raise RuntimeError("RedFox workDetail returned unexpected data")
+    return detail, work_uuid, account
+
+
+def extract_images_from_detail(detail: Any):
+    images = []
+
+    def add(value):
+        if not isinstance(value, str):
+            return
+        value = html_lib.unescape(value).replace(r"\\/", "/").strip()
+        if not value:
+            return
+
+        low = value.lower()
+        if "<img" in low or "data-src" in low:
+            try:
+                _, ims = parse_fragment(value)
+                images.extend(ims)
+            except Exception:
+                pass
+            try:
+                sel = Selector(text=value)
+                for attr in ("data-src", "src", "data-original", "data-backsrc"):
+                    images.extend(
+                        x.strip() for x in sel.xpath(f"//img/@{attr}").getall()
+                        if isinstance(x, str) and x.strip()
+                    )
+            except Exception:
+                pass
+
+        images.extend(
+            m.group(1).strip()
+            for m in re.finditer(r"!\\[[^\\]]*\\]\\((https?://[^)\\s]+)\\)", value)
+        )
+
+        for m in re.finditer(r"https?://[^\\s\\\"'<>\\)]+", value):
+            u = m.group(0).rstrip(".,;")
+            ul = u.lower()
+            if (
+                any(host in ul for host in (
+                    "mmbiz.qpic.cn", "mmbiz.qlogo.cn", "mmbiz.qpic", "toutiaoimg.com",
+                    "byteimg.com", "tos-cn-", "imagex", "qpic.cn",
+                ))
+                or re.search(r"\\.(?:jpe?g|png|webp|gif)(?:\\?|$)", ul)
+            ):
+                images.append(u)
+
+    def visit(obj, key=""):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                kl = str(k).lower()
+                if isinstance(v, str) and any(t in kl for t in ("image", "img", "pic", "cover", "content", "html")):
+                    add(v)
+                visit(v, kl)
+        elif isinstance(obj, list):
+            for v in obj:
+                visit(v, key)
+        elif isinstance(obj, str):
+            add(obj)
+
+    visit(detail)
+    return _dedupe_urls(images)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("url")
@@ -388,6 +565,28 @@ def main():
 
     if source_images:
         best["images"] = _dedupe_urls(list(best.get("images") or []) + source_images)
+
+    # If the direct WeChat page is protected by a CAPTCHA, fall back to the
+    # already-configured RedFox public article database and recover the full
+    # work detail by account + exact title.
+    if source_url and not source_images and os.getenv("REDFOX_API_KEY", "").strip():
+        try:
+            detail, work_uuid, account = redfox_article_detail(best.get("author"), best.get("title"))
+            (out / "redfox_work_detail.json").write_text(
+                json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            redfox_images = extract_images_from_detail(detail)
+            report["redfox_work_uuid"] = work_uuid
+            report["redfox_account"] = {
+                "account": account.get("account"),
+                "accountName": account.get("accountName"),
+                "wxId": account.get("wxId"),
+            }
+            report["redfox_image_count"] = len(redfox_images)
+            if redfox_images:
+                best["images"] = _dedupe_urls(list(best.get("images") or []) + redfox_images)
+        except Exception as e:
+            report["errors"].append(f"RedFox fallback failed: {type(e).__name__}: {e}")
 
     # Last fallback: title/meta from any page even if no body parsed.
     if not best["title"]:
