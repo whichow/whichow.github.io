@@ -1,0 +1,7 @@
+{
+  "url": "https://m.toutiao.com/is/8EuPXqpA--8/",
+  "mirror_url": "https://www.yeeyi.com/news/details/3233779/",
+  "skip_redfox": true,
+  "download_images": true,
+  "note": "Update url for the next Toutiao article. Leave mirror_url empty on the first run; fill it only if primary extraction returns image_count=0."
+}
