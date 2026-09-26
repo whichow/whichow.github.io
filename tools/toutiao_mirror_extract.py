@@ -99,11 +99,14 @@ def extract_next_data(page: str):
     urls = []
     if html_candidates:
         html_candidates.sort(reverse=True)
-        # Prefer the candidate containing the most inline images.
-        urls.extend(image_urls_from_html(html_candidates[0][2]))
+        # Prefer the candidate containing the most inline images. When this
+        # yields body images, do not mix in cover/related-card images elsewhere
+        # in __NEXT_DATA__.
+        urls = image_urls_from_html(html_candidates[0][2])
         metadata["next_data_path"] = html_candidates[0][3]
-    urls.extend(direct_urls)
-    return dedupe(urls), metadata
+        if urls:
+            return dedupe(urls), metadata
+    return dedupe(direct_urls), metadata
 
 
 def extract_dom(page: str):
@@ -191,7 +194,9 @@ def main():
 
     next_urls, metadata = extract_next_data(r.text)
     dom_urls = extract_dom(r.text)
-    urls = dedupe(next_urls + dom_urls)
+    # Structured article-body extraction wins over full-page DOM scanning.
+    # The latter often contains cover, recommendation and UI images.
+    urls = dedupe(next_urls if next_urls else dom_urls)
 
     result = {
         "mirror_url": args.url,
