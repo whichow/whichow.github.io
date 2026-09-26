@@ -36,7 +36,7 @@ jobs:
         run: |
           rm -rf output
           mkdir -p output
-          python tools/toutiao_article_extract.py "https://m.toutiao.com/is/iNw5XJvO-Qw/" --out output
+          python tools/toutiao_article_extract.py "https://m.toutiao.com/is/8EuPXqpA--8/" --out output
 
       - name: Diagnostics
         if: always()
