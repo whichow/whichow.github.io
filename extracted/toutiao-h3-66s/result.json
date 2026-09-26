@@ -1,8 +1,6 @@
 {
   "input_url": "https://m.toutiao.com/is/8EuPXqpA--8/",
-  "errors": [
-    "RedFox fallback failed: RuntimeError: RedFox article not found; recent titles=['中产健身，越来越像「做题家」？', '2026第一网红运动：花钱上场，拿命硬扛？', '销冠比亚迪，营收利润双降', '被误读的《抓特务》，与“说不出漂亮话”的冯小刚', '《凤凰周刊》招聘国际记者', '这届年轻人逛超市，开始问AI了', '晚晚，收割女孩千万', '2026「月饼界爱马仕」，不是人吃的']"
-  ],
+  "errors": [],
   "source_project": "NanmiCoder/NewsCrawler",
   "resolved_url": "https://m.toutiao.com/article/7689650567643152930/?app=news_article&category_new=__all__&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=17ac95a6-b952-11f1-9228-f4204de53ff1&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1790389766&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link",
   "redirect_chain": [
@@ -30,7 +28,7 @@
       "name": "article_mobile.html",
       "status": 200,
       "final_url": "https://m.toutiao.com/article/7689650567643152930/?upstream_biz=toutiao_pc",
-      "bytes": 98783
+      "bytes": 98774
     }
   ],
   "render_candidates": {
@@ -92,8 +90,8 @@
   "source_url": "https://mp.weixin.qq.com/s?__biz=MzI1NDY5NDM3OQ==&mid=2248116170&idx=1&sn=903494108f66690b057d604d03abdddd",
   "source_fetch": {
     "status": 200,
-    "final_url": "https://mp.weixin.qq.com/mp/wappoc_appmsgcaptcha?poc_token=HFc-t2qjQANM_RbrFWxu26yc6r7c0TCUSH88uHsI&target_url=https%3A%2F%2Fmp.weixin.qq.com%2Fs%3F__biz%3DMzI1NDY5NDM3OQ%3D%3D%26mid%3D2248116170%26idx%3D1%26sn%3D903494108f66690b057d604d03abdddd",
-    "bytes": 17761,
+    "final_url": "https://mp.weixin.qq.com/mp/wappoc_appmsgcaptcha?poc_token=HBc_t2qjpLcEfICQIA-DFjXclq7-nb29kNYLuwJ4&target_url=https%3A%2F%2Fmp.weixin.qq.com%2Fs%3F__biz%3DMzI1NDY5NDM3OQ%3D%3D%26mid%3D2248116170%26idx%3D1%26sn%3D903494108f66690b057d604d03abdddd",
+    "bytes": 17760,
     "image_count": 0
   },
   "render_data_found": true,
