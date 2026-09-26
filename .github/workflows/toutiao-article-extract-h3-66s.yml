@@ -44,26 +44,72 @@ jobs:
         if: always()
         run: |
           python - <<'PY'
-          import json, requests
+          import json, requests, pathlib, zipfile
+          from urllib.parse import urlsplit, urlunsplit
           from parsel import Selector
+
           url = "https://www.yeeyi.com/news/details/3233779/"
-          r = requests.get(url, timeout=40, headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"})
-          open("output/mirror.html","w",encoding="utf-8",errors="ignore").write(r.text)
+          headers = {
+              "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36",
+              "Referer":"https://www.yeeyi.com/",
+          }
+          r = requests.get(url, timeout=40, headers=headers)
+          r.raise_for_status()
+          pathlib.Path("output/mirror.html").write_text(r.text,encoding="utf-8",errors="ignore")
+
           sel = Selector(text=r.text)
-          rows=[]
-          for img in sel.xpath("//img"):
-              rows.append({
-                  "src": img.xpath("./@src").get(),
-                  "data_src": img.xpath("./@data-src").get(),
-                  "data_original": img.xpath("./@data-original").get(),
-                  "alt": img.xpath("./@alt").get(),
-                  "class": img.xpath("./@class").get(),
+          raw = sel.xpath('//script[@id="__NEXT_DATA__"]/text()').get()
+          if not raw:
+              raise RuntimeError("__NEXT_DATA__ missing")
+          data = json.loads(raw)
+          info = data["props"]["pageProps"]["newsDetail"]["newsInfo"]
+          content = info.get("content") or ""
+          body = Selector(text=content)
+          urls=[]
+          for u in body.xpath("//img/@src | //img/@data-src | //img/@data-original").getall():
+              u=(u or "").strip()
+              if u and u not in urls:
+                  urls.append(u)
+
+          outdir=pathlib.Path("output/images")
+          outdir.mkdir(parents=True,exist_ok=True)
+          manifest=[]
+          for i,u in enumerate(urls,1):
+              parts=urlsplit(u)
+              original=urlunsplit((parts.scheme,parts.netloc,parts.path,"",""))
+              ext=pathlib.Path(parts.path).suffix.lower()
+              if ext not in (".jpg",".jpeg",".png",".webp",".gif"):
+                  ext=".bin"
+              path=outdir/f"{i:02d}{ext}"
+              resp=None
+              used=original
+              try:
+                  resp=requests.get(original,timeout=40,headers=headers)
+                  if resp.status_code>=400 or not resp.content:
+                      raise RuntimeError(f"HTTP {resp.status_code}")
+              except Exception:
+                  used=u
+                  resp=requests.get(u,timeout=40,headers=headers)
+                  resp.raise_for_status()
+              path.write_bytes(resp.content)
+              manifest.append({
+                  "index":i,"url":u,"download_url":used,"file":path.name,
+                  "bytes":len(resp.content),"content_type":resp.headers.get("content-type","")
               })
-          open("output/mirror_images.json","w",encoding="utf-8").write(json.dumps({
-              "status":r.status_code, "final_url":str(r.url), "bytes":len(r.content),
-              "title":sel.xpath("//title/text()").get(), "images":rows
-          },ensure_ascii=False,indent=2))
-          print("mirror",r.status_code,len(r.content),"images",len(rows))
+              print(i,path.name,len(resp.content),resp.headers.get("content-type",""))
+
+          pathlib.Path("output/mirror_images.json").write_text(
+              json.dumps({
+                  "status":r.status_code,"final_url":str(r.url),"bytes":len(r.content),
+                  "title":info.get("title"),"source":info.get("froms"),
+                  "image_count":len(urls),"images":manifest
+              },ensure_ascii=False,indent=2),encoding="utf-8"
+          )
+          with zipfile.ZipFile("output/article_images.zip","w",zipfile.ZIP_DEFLATED) as z:
+              for m in manifest:
+                  z.write(outdir/m["file"], arcname=m["file"])
+              z.write("output/mirror_images.json", arcname="manifest.json")
+          print("mirror",r.status_code,len(r.content),"images",len(urls))
           PY
 
       - name: Diagnostics
