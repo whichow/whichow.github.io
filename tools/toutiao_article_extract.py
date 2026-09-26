@@ -632,7 +632,7 @@ def main():
     # If the direct WeChat page is protected by a CAPTCHA, fall back to the
     # already-configured RedFox public article database and recover the full
     # work detail by account + exact title.
-    if source_url and not source_images and os.getenv("REDFOX_API_KEY", "").strip():
+    if source_url and not source_images and os.getenv("REDFOX_API_KEY", "").strip() and os.getenv("SKIP_REDFOX", "").strip() != "1":
         try:
             detail, work_uuid, account = redfox_article_detail(best.get("author"), best.get("title"))
             (out / "redfox_work_detail.json").write_text(
