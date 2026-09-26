@@ -40,6 +40,32 @@ jobs:
           mkdir -p output
           python tools/toutiao_article_extract.py "https://m.toutiao.com/is/8EuPXqpA--8/" --out output
 
+      - name: Fetch mirror diagnostic
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, requests
+          from parsel import Selector
+          url = "https://www.yeeyi.com/news/details/3233779/"
+          r = requests.get(url, timeout=40, headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"})
+          open("output/mirror.html","w",encoding="utf-8",errors="ignore").write(r.text)
+          sel = Selector(text=r.text)
+          rows=[]
+          for img in sel.xpath("//img"):
+              rows.append({
+                  "src": img.xpath("./@src").get(),
+                  "data_src": img.xpath("./@data-src").get(),
+                  "data_original": img.xpath("./@data-original").get(),
+                  "alt": img.xpath("./@alt").get(),
+                  "class": img.xpath("./@class").get(),
+              })
+          open("output/mirror_images.json","w",encoding="utf-8").write(json.dumps({
+              "status":r.status_code, "final_url":str(r.url), "bytes":len(r.content),
+              "title":sel.xpath("//title/text()").get(), "images":rows
+          },ensure_ascii=False,indent=2))
+          print("mirror",r.status_code,len(r.content),"images",len(rows))
+          PY
+
       - name: Diagnostics
         if: always()
         run: |
