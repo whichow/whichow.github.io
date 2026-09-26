@@ -563,6 +563,50 @@ def main():
                     "source": name + ":render_data",
                 }
 
+    # Older mobile and PWA detail APIs sometimes retain inline images even
+    # when the public SSR article body has had its <img> nodes removed.
+    detail_api_images = []
+    detail_api_fetches = []
+    detail_api_urls = [
+        f"https://m.toutiao.com/i{article_id}/info/",
+        f"https://m.toutiao.com/pwa/api/wxapp/info/{article_id}/",
+    ]
+    for api_url in detail_api_urls:
+        try:
+            ar = http_get(s, api_url, mobile=True, referer=canonical)
+            info = {
+                "url": api_url,
+                "status": ar.status_code,
+                "final_url": str(ar.url),
+                "bytes": len(ar.content),
+            }
+            try:
+                payload = ar.json()
+            except Exception:
+                try:
+                    payload = json.loads(ar.text)
+                except Exception:
+                    payload = None
+            if payload is not None:
+                safe_name = "detail_api_" + str(len(detail_api_fetches) + 1) + ".json"
+                (out / safe_name).write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                ims = extract_images_from_detail(payload)
+                detail_api_images.extend(ims)
+                info["image_count"] = len(ims)
+                if isinstance(payload, dict):
+                    info["top_keys"] = list(payload.keys())[:30]
+            detail_api_fetches.append(info)
+        except Exception as e:
+            detail_api_fetches.append({"url": api_url, "error": f"{type(e).__name__}: {e}"})
+
+    report["detail_api_fetches"] = detail_api_fetches
+    detail_api_images = _dedupe_urls(detail_api_images)
+    report["detail_api_image_count"] = len(detail_api_images)
+    if detail_api_images:
+        best["images"] = _dedupe_urls(list(best.get("images") or []) + detail_api_images)
+
     # Toutiao reprints can strip inline image nodes from articleInfo.content.
     # If RENDER_DATA exposes the original WeChat source, fetch that public page
     # and recover its inline images.
