@@ -353,28 +353,34 @@ def redfox_article_detail(author: str, title: str):
         reverse=True,
     )
     account = accounts[0]
-    account_id = str(account.get("account") or "").strip()
-    if not account_id:
-        # Some responses identify the account only by wxId/bizInfo.
-        account_id = str(account.get("wxId") or account.get("bizInfo") or "").strip()
-    if not account_id:
+    identity = {}
+    if str(account.get("wxId") or "").strip():
+        identity["wxId"] = str(account.get("wxId")).strip()
+    elif str(account.get("bizInfo") or "").strip():
+        identity["bizInfo"] = str(account.get("bizInfo")).strip()
+    elif str(account.get("account") or "").strip():
+        identity["account"] = str(account.get("account")).strip()
+    if not identity:
         raise RuntimeError("RedFox account record has no query identifier")
 
     target = _norm_text(title)
     matched = None
-    for offset in range(0, 101, 20):
+    candidates = []
+    for offset in range(0, 201, 20):
         payload = {
             "source": "Toutiao article extractor",
-            "account": account_id,
             "sortType": "2",
             "offset": offset,
+            **identity,
         }
         listing = _redfox_post("/story/api/gzh/data/queryWorkList", payload)
         rows = [x for x in _redfox_rows(listing) if isinstance(x, dict)]
         if not rows:
             break
+        candidates.extend(rows)
         for row in rows:
-            if _norm_text(row.get("title")) == target:
+            rt = _norm_text(row.get("title"))
+            if rt == target or (rt and target and (rt in target or target in rt)):
                 matched = row
                 break
         if matched:
@@ -382,8 +388,21 @@ def redfox_article_detail(author: str, title: str):
         if len(rows) < 20:
             break
 
+    if not matched and candidates:
+        # Reprints occasionally alter punctuation/subtitles. Choose only a very
+        # close title match rather than silently accepting an unrelated work.
+        import difflib
+        scored = sorted(
+            ((difflib.SequenceMatcher(None, target, _norm_text(x.get("title"))).ratio(), x) for x in candidates),
+            key=lambda z: z[0],
+            reverse=True,
+        )
+        if scored and scored[0][0] >= 0.72:
+            matched = scored[0][1]
+
     if not matched:
-        raise RuntimeError("RedFox did not find exact article title in recent works")
+        sample = [str(x.get("title") or "") for x in candidates[:8]]
+        raise RuntimeError(f"RedFox article not found; recent titles={sample}")
 
     work_uuid = str(matched.get("workUuid") or matched.get("uuid") or matched.get("id") or "").strip()
     if not work_uuid:
