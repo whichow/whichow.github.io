@@ -1,13 +1,29 @@
-name: Extract Toutiao article H3 66s
+name: Extract Toutiao article
 
 on:
   push:
     branches:
       - toutiao-article-extract-h3-66s
     paths:
+      - ".github/toutiao-extract/request.json"
       - "tools/toutiao_article_extract.py"
+      - "tools/toutiao_mirror_extract.py"
       - ".github/workflows/toutiao-article-extract-h3-66s.yml"
   workflow_dispatch:
+    inputs:
+      url:
+        description: "Toutiao short/article URL. Empty = request.json"
+        required: false
+        type: string
+      mirror_url:
+        description: "Optional exact-title/source mirror URL for image fallback"
+        required: false
+        type: string
+      skip_redfox:
+        description: "Skip RedFox fallback"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -18,7 +34,10 @@ jobs:
     timeout-minutes: 20
     env:
       REDFOX_API_KEY: ${{ secrets.REDFOX_API_KEY }}
-      SKIP_REDFOX: "1"
+      INPUT_URL: ${{ inputs.url }}
+      INPUT_MIRROR_URL: ${{ inputs.mirror_url }}
+      INPUT_SKIP_REDFOX: ${{ inputs.skip_redfox }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,110 +52,92 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests curl_cffi parsel lxml
 
-      - name: Extract article
+      - name: Resolve request
+        run: |
+          mkdir -p output
+          python - <<'PY'
+          import json, os, pathlib
+
+          request_path = pathlib.Path(".github/toutiao-extract/request.json")
+          request = json.loads(request_path.read_text("utf-8")) if request_path.exists() else {}
+
+          url = os.getenv("INPUT_URL", "").strip() or str(request.get("url") or "").strip()
+          mirror = os.getenv("INPUT_MIRROR_URL", "").strip()
+          if not mirror:
+              mirror = str(request.get("mirror_url") or "").strip()
+
+          raw_skip = os.getenv("INPUT_SKIP_REDFOX", "").strip().lower()
+          if raw_skip in ("true", "false"):
+              skip_redfox = raw_skip == "true"
+          else:
+              skip_redfox = bool(request.get("skip_redfox", False))
+
+          download_images = bool(request.get("download_images", True))
+
+          if not url:
+              raise SystemExit("No Toutiao URL in workflow input or request.json")
+
+          resolved = {
+              "url": url,
+              "mirror_url": mirror,
+              "skip_redfox": skip_redfox,
+              "download_images": download_images,
+          }
+          pathlib.Path("output/request.resolved.json").write_text(
+              json.dumps(resolved, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
+              fh.write(f"TOUTIAO_URL={url}\n")
+              fh.write(f"MIRROR_URL={mirror}\n")
+              fh.write(f"SKIP_REDFOX={'1' if skip_redfox else '0'}\n")
+              fh.write(f"DOWNLOAD_IMAGES={'1' if download_images else '0'}\n")
+          print(json.dumps(resolved, ensure_ascii=False))
+          PY
+
+      - name: Extract Toutiao article
         id: extract
         continue-on-error: true
         run: |
-          rm -rf output
-          mkdir -p output
-          python tools/toutiao_article_extract.py "https://m.toutiao.com/is/8EuPXqpA--8/" --out output
+          python tools/toutiao_article_extract.py "$TOUTIAO_URL" --out output
 
-      - name: Fetch mirror diagnostic
+      - name: Recover images from mirror
         if: always()
         run: |
-          python - <<'PY'
-          import json, requests, pathlib, zipfile
-          from urllib.parse import urlsplit, urlunsplit
-          from parsel import Selector
-
-          url = "https://www.yeeyi.com/news/details/3233779/"
-          headers = {
-              "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36",
-              "Referer":"https://www.yeeyi.com/",
-          }
-          r = requests.get(url, timeout=40, headers=headers)
-          r.raise_for_status()
-          pathlib.Path("output/mirror.html").write_text(r.text,encoding="utf-8",errors="ignore")
-
-          sel = Selector(text=r.text)
-          raw = sel.xpath('//script[@id="__NEXT_DATA__"]/text()').get()
-          if not raw:
-              raise RuntimeError("__NEXT_DATA__ missing")
-          data = json.loads(raw)
-          info = data["props"]["pageProps"]["newsDetail"]["newsInfo"]
-          content = info.get("content") or ""
-          body = Selector(text=content)
-          urls=[]
-          for u in body.xpath("//img/@src | //img/@data-src | //img/@data-original").getall():
-              u=(u or "").strip()
-              if u and u not in urls:
-                  urls.append(u)
-
-          outdir=pathlib.Path("output/images")
-          outdir.mkdir(parents=True,exist_ok=True)
-          manifest=[]
-          for i,u in enumerate(urls,1):
-              parts=urlsplit(u)
-              original=urlunsplit((parts.scheme,parts.netloc,parts.path,"",""))
-              ext=pathlib.Path(parts.path).suffix.lower()
-              if ext not in (".jpg",".jpeg",".png",".webp",".gif"):
-                  ext=".bin"
-              path=outdir/f"{i:02d}{ext}"
-              resp=None
-              used=original
-              try:
-                  resp=requests.get(original,timeout=40,headers=headers)
-                  if resp.status_code>=400 or not resp.content:
-                      raise RuntimeError(f"HTTP {resp.status_code}")
-              except Exception:
-                  used=u
-                  resp=requests.get(u,timeout=40,headers=headers)
-                  resp.raise_for_status()
-              path.write_bytes(resp.content)
-              manifest.append({
-                  "index":i,"url":u,"download_url":used,"file":path.name,
-                  "bytes":len(resp.content),"content_type":resp.headers.get("content-type","")
-              })
-              print(i,path.name,len(resp.content),resp.headers.get("content-type",""))
-
-          pathlib.Path("output/mirror_images.json").write_text(
-              json.dumps({
-                  "status":r.status_code,"final_url":str(r.url),"bytes":len(r.content),
-                  "title":info.get("title"),"source":info.get("froms"),
-                  "image_count":len(urls),"images":manifest
-              },ensure_ascii=False,indent=2),encoding="utf-8"
-          )
-          with zipfile.ZipFile("output/article_images.zip","w",zipfile.ZIP_DEFLATED) as z:
-              for m in manifest:
-                  z.write(outdir/m["file"], arcname=m["file"])
-              z.write("output/mirror_images.json", arcname="manifest.json")
-          print("mirror",r.status_code,len(r.content),"images",len(urls))
-          PY
+          if [ -z "$MIRROR_URL" ]; then
+            echo "No mirror_url configured; skip mirror fallback."
+            exit 0
+          fi
+          if [ "$DOWNLOAD_IMAGES" = "1" ]; then
+            python tools/toutiao_mirror_extract.py "$MIRROR_URL" --out output --download
+          else
+            python tools/toutiao_mirror_extract.py "$MIRROR_URL" --out output
+          fi
 
       - name: Diagnostics
         if: always()
         run: |
           echo "===== FILES ====="
-          find output -maxdepth 1 -type f -printf '%f %s bytes\n' | sort || true
+          find output -maxdepth 2 -type f -printf '%p %s bytes\n' | sort || true
           echo "===== RESULT ====="
           cat output/result.json || true
+          echo "===== MIRROR ====="
+          cat output/mirror_images.json || true
           echo "===== ARTICLE ====="
           cat output/article.md || true
 
-      - name: Persist extraction result to branch
+      - name: Persist latest extraction metadata
         if: always()
         run: |
           mkdir -p extracted/toutiao-h3-66s
-          cp -f output/result.json extracted/toutiao-h3-66s/result.json 2>/dev/null || true
-          cp -f output/article.md extracted/toutiao-h3-66s/article.md 2>/dev/null || true
-          cp -f output/shortlink_response.html extracted/toutiao-h3-66s/shortlink_response.html 2>/dev/null || true
-          cp -f output/article_desktop.html extracted/toutiao-h3-66s/article_desktop.html 2>/dev/null || true
-          cp -f output/article_mobile.html extracted/toutiao-h3-66s/article_mobile.html 2>/dev/null || true
+          for f in result.json article.md mirror_images.json request.resolved.json; do
+            cp -f "output/$f" "extracted/toutiao-h3-66s/$f" 2>/dev/null || true
+          done
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add extracted/toutiao-h3-66s
           if ! git diff --cached --quiet; then
-            git commit -m "Persist Toutiao H3 article extraction result"
+            git commit -m "Persist latest Toutiao extraction metadata"
             git push origin HEAD:toutiao-article-extract-h3-66s
           fi
 
@@ -144,7 +145,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: toutiao-h3-66s-article
+          name: toutiao-article-extract-${{ github.run_id }}
           path: output/
           if-no-files-found: warn
           retention-days: 3
