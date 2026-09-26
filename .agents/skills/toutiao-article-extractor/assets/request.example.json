@@ -1,0 +1,7 @@
+{
+  "url": "https://m.toutiao.com/is/SHORT_ID/",
+  "mirror_url": "",
+  "skip_redfox": false,
+  "download_images": true,
+  "note": "First run: leave mirror_url empty. Add only a verified exact-content mirror if primary image_count is 0."
+}
