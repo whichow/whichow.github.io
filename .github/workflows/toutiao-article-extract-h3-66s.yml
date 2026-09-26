@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 20
     env:
       REDFOX_API_KEY: ${{ secrets.REDFOX_API_KEY }}
+      SKIP_REDFOX: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
