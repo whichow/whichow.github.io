@@ -3,7 +3,7 @@
   "status": 200,
   "final_url": "https://www.yeeyi.com/news/details/3233779/",
   "bytes": 31401,
-  "image_count": 28,
+  "image_count": 22,
   "images": [
     "https://resources.zhayieye.com/news/data/article/2026_09_26/a1d5d9aeb4ea2d2a8f8a3fd4ae077654dE4wms8tF0Pa.jpg?x-oss-process=image/resize,w_650,m_lfit",
     "https://resources.zhayieye.com/news/data/article/2026_09_26/c9806d368019c2983c1da197ca3e9b43h62NuMTEl4xL.jpg?x-oss-process=image/resize,w_650,m_lfit",
@@ -26,18 +26,12 @@
     "https://resources.zhayieye.com/news/data/article/2026_09_26/649ee39ff538344a73bc9dd43f1f6723zym2ftF5EQRn.gif?x-oss-process=image/resize,w_650,m_lfit",
     "https://resources.zhayieye.com/news/data/article/2026_09_26/0b5e19900c33eb13fab0f56b1801b745J4kCGFfzVTis.jpg?x-oss-process=image/resize,w_650,m_lfit",
     "https://resources.zhayieye.com/news/data/article/2026_09_26/feb60ea26c0253ea998be3f89f7fe0d5wiUuc7eK6YQH.jpg?x-oss-process=image/resize,w_650,m_lfit",
-    "https://resources.zhayieye.com/news/data/article/2026_09_26/4c0b733d8bc5ba9574d2596bd06d18e9ul2cavQ4g7ti.jpg?x-oss-process=image/resize,w_650,m_lfit",
-    "https://resources.zhayieye.com/news/data/article/2026_09_26/21d1480c096e46249b8dde2c661cd141h4Big6rdnJe2.jpeg",
-    "https://resources.zhayieye.com/news/data/article/2026_09_26/047fe42ef551ef1a54f6961d70bd84d984ZH0SAtxoWD.jpeg",
-    "https://resources.zhayieye.com/news/data/article/2026_09_26/acf5565684a13aeb08220b1a20a10967uvEnHStcQTpg.jpeg",
-    "https://resources.zhayieye.com/news/data/article/2026_09_26/d8931f1af0ad6bd8142934427f04cba21RbMJD0t64ls.jpeg",
-    "https://resources.zhayieye.com/news/data/article/2026_09_26/ab693920818f698ceb4b4a8704d1a863kGBJUuRIjMEo.jpeg",
-    "https://resources.zhayieye.com/news/data/article/2026_09_26/572220c3c8495bec65280eb87d3a73bbnjzgKilSAcFN.jpeg"
+    "https://resources.zhayieye.com/news/data/article/2026_09_26/4c0b733d8bc5ba9574d2596bd06d18e9ul2cavQ4g7ti.jpg?x-oss-process=image/resize,w_650,m_lfit"
   ],
   "title": "新时代「擦边三件套」，盯上缺钱的女孩",
   "source": "凤凰WEEKLY",
   "next_data_path": "props.pageprops.newsdetail.newsinfo.content",
-  "downloaded_count": 28,
+  "downloaded_count": 22,
   "files": [
     {
       "index": 1,
@@ -213,54 +207,6 @@
       "download_url": "https://resources.zhayieye.com/news/data/article/2026_09_26/4c0b733d8bc5ba9574d2596bd06d18e9ul2cavQ4g7ti.jpg",
       "file": "22.jpg",
       "bytes": 263028,
-      "content_type": "image/jpeg"
-    },
-    {
-      "index": 23,
-      "url": "https://resources.zhayieye.com/news/data/article/2026_09_26/21d1480c096e46249b8dde2c661cd141h4Big6rdnJe2.jpeg",
-      "download_url": "https://resources.zhayieye.com/news/data/article/2026_09_26/21d1480c096e46249b8dde2c661cd141h4Big6rdnJe2.jpeg",
-      "file": "23.jpg",
-      "bytes": 92407,
-      "content_type": "image/jpeg"
-    },
-    {
-      "index": 24,
-      "url": "https://resources.zhayieye.com/news/data/article/2026_09_26/047fe42ef551ef1a54f6961d70bd84d984ZH0SAtxoWD.jpeg",
-      "download_url": "https://resources.zhayieye.com/news/data/article/2026_09_26/047fe42ef551ef1a54f6961d70bd84d984ZH0SAtxoWD.jpeg",
-      "file": "24.jpg",
-      "bytes": 88129,
-      "content_type": "image/jpeg"
-    },
-    {
-      "index": 25,
-      "url": "https://resources.zhayieye.com/news/data/article/2026_09_26/acf5565684a13aeb08220b1a20a10967uvEnHStcQTpg.jpeg",
-      "download_url": "https://resources.zhayieye.com/news/data/article/2026_09_26/acf5565684a13aeb08220b1a20a10967uvEnHStcQTpg.jpeg",
-      "file": "25.jpg",
-      "bytes": 70154,
-      "content_type": "image/jpeg"
-    },
-    {
-      "index": 26,
-      "url": "https://resources.zhayieye.com/news/data/article/2026_09_26/d8931f1af0ad6bd8142934427f04cba21RbMJD0t64ls.jpeg",
-      "download_url": "https://resources.zhayieye.com/news/data/article/2026_09_26/d8931f1af0ad6bd8142934427f04cba21RbMJD0t64ls.jpeg",
-      "file": "26.jpg",
-      "bytes": 32860,
-      "content_type": "image/jpeg"
-    },
-    {
-      "index": 27,
-      "url": "https://resources.zhayieye.com/news/data/article/2026_09_26/ab693920818f698ceb4b4a8704d1a863kGBJUuRIjMEo.jpeg",
-      "download_url": "https://resources.zhayieye.com/news/data/article/2026_09_26/ab693920818f698ceb4b4a8704d1a863kGBJUuRIjMEo.jpeg",
-      "file": "27.jpg",
-      "bytes": 41387,
-      "content_type": "image/jpeg"
-    },
-    {
-      "index": 28,
-      "url": "https://resources.zhayieye.com/news/data/article/2026_09_26/572220c3c8495bec65280eb87d3a73bbnjzgKilSAcFN.jpeg",
-      "download_url": "https://resources.zhayieye.com/news/data/article/2026_09_26/572220c3c8495bec65280eb87d3a73bbnjzgKilSAcFN.jpeg",
-      "file": "28.jpg",
-      "bytes": 95595,
       "content_type": "image/jpeg"
     }
   ]
