@@ -226,6 +226,64 @@ def parse_render_article(data: Any):
         "candidates": [{"path": p, "chars": len(v), "score": s} for s, p, v in content_candidates[:10]],
     }
 
+def _normalize_url(url: str) -> str:
+    url = html_lib.unescape(str(url or "")).strip()
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("http://mp.weixin.qq.com/"):
+        return "https://" + url[len("http://"):]
+    return url
+
+
+def get_source_url(data: Any) -> str:
+    if isinstance(data, dict):
+        info = data.get("articleInfo") or data.get("articleinfo")
+        if isinstance(info, dict):
+            url = _normalize_url(info.get("url") or info.get("source_url") or "")
+            if "mp.weixin.qq.com/s" in url:
+                return url
+    if data is not None:
+        for _, value in walk(data):
+            if isinstance(value, str) and "mp.weixin.qq.com/s" in value:
+                return _normalize_url(value)
+    return ""
+
+
+def _dedupe_urls(urls):
+    out = []
+    seen = set()
+    for url in urls:
+        u = _normalize_url(url)
+        if not u or u in seen:
+            continue
+        if u.startswith(("data:", "javascript:")):
+            continue
+        seen.add(u)
+        out.append(u)
+    return out
+
+
+def parse_wechat_images(page: str):
+    sel = Selector(text=page)
+    roots = sel.xpath("//*[@id='js_content']")
+    scope = roots if roots else sel
+    images = []
+    for attr in ("data-src", "src", "data-original", "data-backsrc"):
+        images.extend(
+            u.strip()
+            for u in scope.xpath(f".//img/@{attr}").getall()
+            if isinstance(u, str) and u.strip()
+        )
+    # Some public WeChat pages expose a cover image only in OG metadata.
+    if not images:
+        images.extend(
+            u.strip()
+            for u in sel.xpath('//meta[@property="og:image"]/@content').getall()
+            if isinstance(u, str) and u.strip()
+        )
+    return _dedupe_urls(images)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("url")
@@ -274,6 +332,7 @@ def main():
 
     best = {"title": "", "author": "", "publish_time": "", "paragraphs": [], "images": [], "source": ""}
     render_found = False
+    source_url = ""
     for name, page in pages:
         if not page:
             continue
@@ -287,6 +346,8 @@ def main():
         data = parse_render_data(page)
         if data is not None:
             render_found = True
+            if not source_url:
+                source_url = get_source_url(data)
             safe = name.replace(".html", "")
             (out / f"{safe}.render_data.json").write_text(
                 json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -305,6 +366,28 @@ def main():
                     "images": rd["images"] or images,
                     "source": name + ":render_data",
                 }
+
+    # Toutiao reprints can strip inline image nodes from articleInfo.content.
+    # If RENDER_DATA exposes the original WeChat source, fetch that public page
+    # and recover its inline images.
+    source_images = []
+    if source_url:
+        report["source_url"] = source_url
+        try:
+            wr = http_get(s, source_url, mobile=True, referer="https://mp.weixin.qq.com/")
+            (out / "source_article.html").write_text(wr.text, encoding="utf-8", errors="ignore")
+            source_images = parse_wechat_images(wr.text)
+            report["source_fetch"] = {
+                "status": wr.status_code,
+                "final_url": str(wr.url),
+                "bytes": len(wr.content),
+                "image_count": len(source_images),
+            }
+        except Exception as e:
+            report["errors"].append(f"source fetch failed: {type(e).__name__}: {e}")
+
+    if source_images:
+        best["images"] = _dedupe_urls(list(best.get("images") or []) + source_images)
 
     # Last fallback: title/meta from any page even if no body parsed.
     if not best["title"]:
