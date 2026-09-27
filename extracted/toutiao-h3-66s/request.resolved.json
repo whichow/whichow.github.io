@@ -1,6 +1,6 @@
 {
   "url": "https://m.toutiao.com/is/3m4QuJ3lrBE/",
-  "mirror_url": "",
-  "skip_redfox": false,
+  "mirror_url": "https://raw.githubusercontent.com/whichow/whichow.github.io/toutiao-article-extract-h3-66s/extracted/pony-reference-7676021805278183972.html",
+  "skip_redfox": true,
   "download_images": true
 }
