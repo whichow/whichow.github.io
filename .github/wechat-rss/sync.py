@@ -816,6 +816,18 @@ def main() -> int:
                     {"url": _url, "source": "ChatGPT deployed WeChat extractor"},
                 )
                 print("[article-full-debug] " + json.dumps(_detail, ensure_ascii=False)[:30000])
+                _token = _url.rsplit("/", 1)[-1]
+                for _path, _kw in (
+                    ("/story/api/gzhData/searchArticle", _token),
+                    ("/story/api/gzh/data/searchArticle", _token),
+                    ("/story/api/gzhData/searchArticle", _url),
+                    ("/story/api/gzh/data/searchArticle", _url),
+                ):
+                    try:
+                        _sr = _redfox_post(_path, {"keyword": _kw, "offset": 0, "source": "ChatGPT WeChat URL token lookup"})
+                        print("[article-token-search] " + json.dumps({"path": _path, "keyword": _kw, "data": _sr}, ensure_ascii=False)[:18000])
+                    except Exception as _se:
+                        print(f"[article-token-search-error] {_path} {_kw}: {type(_se).__name__}: {_se}", file=sys.stderr)
             except Exception as _exc:
                 print(f"[article-full-debug-error] {type(_exc).__name__}: {_exc}", file=sys.stderr)
 
