@@ -805,6 +805,20 @@ def main() -> int:
     RSS_DIR.mkdir(parents=True, exist_ok=True)
     (PUBLIC_DIR / ".nojekyll").write_text("", encoding="utf-8")
 
+    # Temporary one-shot extraction diagnostic. Only runs for an explicitly
+    # marked source and does not persist article body into the repository.
+    for _src in load_sources():
+        _url = str(_src.get("seed_url") or "").strip()
+        if _url and _src.get("_extract_nonce") and REDFOX_API_KEY:
+            try:
+                _detail = _redfox_post(
+                    "/story/api/gzhData/queryArticleDetail",
+                    {"url": _url, "source": "ChatGPT deployed WeChat extractor"},
+                )
+                print("[article-full-debug] " + json.dumps(_detail, ensure_ascii=False)[:30000])
+            except Exception as _exc:
+                print(f"[article-full-debug-error] {type(_exc).__name__}: {_exc}", file=sys.stderr)
+
     sources = add_source(load_sources())
     base = page_base_url()
     outputs: list[dict] = []
