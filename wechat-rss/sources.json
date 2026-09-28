@@ -19,10 +19,19 @@
       }
     },
     {
-      "query": "",
+      "query": "河北日报",
       "seed_url": "https://mp.weixin.qq.com/s/WeWYRyyAJtdPrErIV7063A",
-      "name": "",
-      "enabled": true
+      "name": "河北日报",
+      "enabled": true,
+      "seed_title": "微信公众平台",
+      "resolved_from": "https://mp.weixin.qq.com/s/WeWYRyyAJtdPrErIV7063A",
+      "redfox": {
+        "account": "hbrbgfwx",
+        "accountName": "河北日报",
+        "wxId": "gh_eef7e50daf56",
+        "bizInfo": "MzA4NjUyMjMzMA=="
+      },
+      "last_backend": "redfox"
     }
   ]
 }
