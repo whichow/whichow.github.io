@@ -819,6 +819,34 @@ def main() -> int:
             except Exception as _exc:
                 print(f"[article-full-debug-error] {type(_exc).__name__}: {_exc}", file=sys.stderr)
 
+            try:
+                _doc_url = "https://redfox.hk/apis/gongzhonghao/I3CIBRI2"
+                _doc = requests.get(_doc_url, timeout=20, headers={"User-Agent": USER_AGENT})
+                _html = _doc.text
+                _hits = sorted(set(re.findall(r"/story/api/[A-Za-z0-9_/?=&.{}:-]+", _html)))
+                _scripts = re.findall(r'<script[^>]+src=["\\']([^"\\']+)["\\']', _html)
+                print("[redfox-realtime-doc] " + json.dumps({
+                    "status": _doc.status_code,
+                    "chars": len(_html),
+                    "api_hits": _hits[:80],
+                    "scripts": _scripts[-30:],
+                    "has_id": "I3CIBRI2" in _html,
+                    "has_title": "根据作品地址获取公众号作品" in _html,
+                }, ensure_ascii=False))
+                if not _hits:
+                    for _src in _scripts[-20:]:
+                        try:
+                            _su = urllib.parse.urljoin(_doc_url, _src)
+                            _js = requests.get(_su, timeout=15, headers={"User-Agent": USER_AGENT}).text
+                            if "I3CIBRI2" in _js or "queryArticleDetail" in _js or "gzh" in _js:
+                                _jh = sorted(set(re.findall(r"/story/api/[A-Za-z0-9_/?=&.{}:-]+", _js)))
+                                if _jh:
+                                    print("[redfox-realtime-js] " + json.dumps({"src": _su, "hits": _jh[:100]}, ensure_ascii=False))
+                        except Exception:
+                            pass
+            except Exception as _de:
+                print(f"[redfox-realtime-doc-error] {type(_de).__name__}: {_de}", file=sys.stderr)
+
             _token = _url.rsplit("/", 1)[-1]
             for _path, _kw in (
                 ("/story/api/gzhData/searchArticle", _token),
