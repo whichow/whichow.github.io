@@ -191,6 +191,28 @@ def resolve_article_source(url: str) -> tuple[str, str]:
                         document.title || ''
                     })"""
                 )
+                debug_info = page.evaluate(
+                    """() => ({
+                      href: location.href,
+                      documentTitle: document.title || '',
+                      h1:
+                        document.querySelector('#activity-name')?.textContent?.trim() ||
+                        document.querySelector('h1.rich_media_title')?.textContent?.trim() || '',
+                      ogTitle: document.querySelector('meta[property="og:title"]')?.content || '',
+                      canonical:
+                        document.querySelector('link[rel="canonical"]')?.href ||
+                        document.querySelector('meta[property="og:url"]')?.content || '',
+                      account:
+                        document.querySelector('#js_name')?.textContent?.trim() ||
+                        document.querySelector('.rich_media_meta_nickname')?.textContent?.trim() ||
+                        document.querySelector('#js_wx_follow_nickname')?.textContent?.trim() ||
+                        (window.nickname || ''),
+                      articleText:
+                        document.querySelector('#js_content')?.innerText?.trim()?.slice(0, 16000) || '',
+                      bodyText: document.body?.innerText?.trim()?.slice(0, 6000) || ''
+                    })"""
+                )
+                print("[article-debug] " + json.dumps(debug_info, ensure_ascii=False))
             finally:
                 browser.close()
         if isinstance(values, dict):
