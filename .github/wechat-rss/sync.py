@@ -836,7 +836,7 @@ def main() -> int:
                 if not _hits:
                     for _src in _scripts[-20:]:
                         try:
-                            _su = urllib.parse.urljoin(_doc_url, _src)
+                            _su = urljoin(_doc_url, _src)
                             _js = requests.get(_su, timeout=15, headers={"User-Agent": USER_AGENT}).text
                             if "I3CIBRI2" in _js or "queryArticleDetail" in _js or "gzh" in _js:
                                 _jh = sorted(set(re.findall(r"/story/api/[A-Za-z0-9_/?=&.{}:-]+", _js)))
