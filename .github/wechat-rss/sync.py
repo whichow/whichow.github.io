@@ -824,7 +824,7 @@ def main() -> int:
                 _doc = requests.get(_doc_url, timeout=20, headers={"User-Agent": USER_AGENT})
                 _html = _doc.text
                 _hits = sorted(set(re.findall(r"/story/api/[A-Za-z0-9_/?=&.{}:-]+", _html)))
-                _scripts = re.findall(r'<script[^>]+src=["\\']([^"\\']+)["\\']', _html)
+                _scripts = re.findall(r"<script[^>]+src=[\"']([^\"']+)[\"']", _html)
                 print("[redfox-realtime-doc] " + json.dumps({
                     "status": _doc.status_code,
                     "chars": len(_html),
