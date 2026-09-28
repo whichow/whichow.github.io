@@ -19,7 +19,7 @@
       }
     },
     {
-      "query": "河北日报",
+      "query": "",
       "seed_url": "https://mp.weixin.qq.com/s/WeWYRyyAJtdPrErIV7063A",
       "name": "河北日报",
       "enabled": true,
@@ -32,7 +32,7 @@
         "bizInfo": "MzA4NjUyMjMzMA=="
       },
       "last_backend": "redfox",
-      "_extract_nonce": "2026-09-28T14:49+08:00"
+      "_extract_nonce": "force-reresolve-20260928"
     }
   ]
 }
