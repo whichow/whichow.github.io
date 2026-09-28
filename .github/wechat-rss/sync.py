@@ -811,69 +811,13 @@ def main() -> int:
         _url = str(_src.get("seed_url") or "").strip()
         if _url and _src.get("_extract_nonce") and REDFOX_API_KEY:
             try:
-                _detail = _redfox_post(
-                    "/story/api/gzhData/queryArticleDetail",
-                    {"url": _url, "source": "ChatGPT deployed WeChat extractor"},
-                )
-                print("[article-full-debug] " + json.dumps(_detail, ensure_ascii=False)[:30000])
-            except Exception as _exc:
-                print(f"[article-full-debug-error] {type(_exc).__name__}: {_exc}", file=sys.stderr)
-
-            try:
                 _rt = _redfox_post(
                     "/story/api/gzh/ability/temp/article/content",
-                    {"url": _url, "source": "ChatGPT deployed WeChat realtime extractor"},
+                    {"articleUrl": _url, "source": "ChatGPT deployed WeChat realtime extractor"},
                 )
-                print("[article-realtime-debug] " + json.dumps(_rt, ensure_ascii=False)[:40000])
+                print("[article-realtime-debug] " + json.dumps(_rt, ensure_ascii=False)[:60000])
             except Exception as _re:
                 print(f"[article-realtime-debug-error] {type(_re).__name__}: {_re}", file=sys.stderr)
-
-            try:
-                _doc_url = "https://redfox.hk/apis/gongzhonghao/I3CIBRI2"
-                _doc = requests.get(_doc_url, timeout=20, headers={"User-Agent": USER_AGENT})
-                _html = _doc.text
-                _hits = sorted(set(re.findall(r"/story/api/[A-Za-z0-9_/?=&.{}:-]+", _html)))
-                _scripts = re.findall(r"<script[^>]+src=[\"']([^\"']+)[\"']", _html)
-                print("[redfox-realtime-doc] " + json.dumps({
-                    "status": _doc.status_code,
-                    "chars": len(_html),
-                    "api_hits": _hits[:80],
-                    "scripts": _scripts[-30:],
-                    "has_id": "I3CIBRI2" in _html,
-                    "has_title": "根据作品地址获取公众号作品" in _html,
-                }, ensure_ascii=False))
-                if not _hits:
-                    for _src in _scripts[-20:]:
-                        try:
-                            _su = urljoin(_doc_url, _src)
-                            _js = requests.get(_su, timeout=15, headers={"User-Agent": USER_AGENT}).text
-                            if "I3CIBRI2" in _js or "queryArticleDetail" in _js or "gzh" in _js:
-                                _jh = sorted(set(re.findall(r"/story/api/[A-Za-z0-9_/?=&.{}:-]+", _js)))
-                                if _jh:
-                                    print("[redfox-realtime-js] " + json.dumps({"src": _su, "hits": _jh[:100]}, ensure_ascii=False))
-                        except Exception:
-                            pass
-            except Exception as _de:
-                print(f"[redfox-realtime-doc-error] {type(_de).__name__}: {_de}", file=sys.stderr)
-
-            _token = _url.rsplit("/", 1)[-1]
-            for _path, _kw in (
-                ("/story/api/gzhData/searchArticle", _token),
-                ("/story/api/gzh/data/searchArticle", _token),
-                ("/story/api/gzhData/searchArticle", _url),
-                ("/story/api/gzh/data/searchArticle", _url),
-            ):
-                try:
-                    _sr = _redfox_post(
-                        _path,
-                        {"keyword": _kw, "offset": 0, "source": "ChatGPT WeChat URL token lookup"},
-                    )
-                    print("[article-token-search] " + json.dumps(
-                        {"path": _path, "keyword": _kw, "data": _sr},
-                        ensure_ascii=False,
-                    )[:18000])
-                except Exception as _se:
-                    print(f"[article-token-search-error] {_path} {_kw}: {type(_se).__name__}: {_se}", file=sys.stderr)
 
     sources = add_source(load_sources())
     base = page_base_url()
