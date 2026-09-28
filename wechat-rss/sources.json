@@ -17,6 +17,12 @@
         "wxId": "gh_672f4fa64015",
         "bizInfo": "MjM5ODQ2MDIyMA=="
       }
+    },
+    {
+      "query": "",
+      "seed_url": "https://mp.weixin.qq.com/s/WeWYRyyAJtdPrErIV7063A",
+      "name": "",
+      "enabled": true
     }
   ]
 }
