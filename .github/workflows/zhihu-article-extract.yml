@@ -1,6 +1,10 @@
 name: Zhihu Article Extractor
 
 on:
+  push:
+    branches: [master]
+    paths:
+      - "zhihu-extract/request.txt"
   workflow_dispatch:
     inputs:
       url:
@@ -20,7 +24,7 @@ permissions:
   contents: read
 
 env:
-  ZHIHU_URL: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.url || inputs.url || 'https://zhuanlan.zhihu.com/p/2085400278489101833' }}
+  DISPATCH_URL: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.url || inputs.url || '' }}
 
 jobs:
   extract:
@@ -42,12 +46,23 @@ jobs:
           python -m pip install playwright "playwright-stealth>=2.0.0" markdownify
           python -m playwright install --with-deps chromium
 
+      - name: Resolve input URL
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            ZHIHU_URL="$(tr -d '\r\n' < zhihu-extract/request.txt)"
+          else
+            ZHIHU_URL="$DISPATCH_URL"
+          fi
+          test -n "$ZHIHU_URL"
+          echo "ZHIHU_URL=$ZHIHU_URL" >> "$GITHUB_ENV"
+          echo "Input: $ZHIHU_URL"
+
       - name: Extract Zhihu article
         shell: bash
         run: |
           rm -rf output
           mkdir -p output
-          echo "Input: $ZHIHU_URL"
           python tools/zhihu_article_extract.py "$ZHIHU_URL" --out output
           cat output/result.json
           test -s output/result.md
