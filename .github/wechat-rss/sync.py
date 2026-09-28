@@ -820,6 +820,15 @@ def main() -> int:
                 print(f"[article-full-debug-error] {type(_exc).__name__}: {_exc}", file=sys.stderr)
 
             try:
+                _rt = _redfox_post(
+                    "/story/api/gzh/ability/temp/article/content",
+                    {"url": _url, "source": "ChatGPT deployed WeChat realtime extractor"},
+                )
+                print("[article-realtime-debug] " + json.dumps(_rt, ensure_ascii=False)[:40000])
+            except Exception as _re:
+                print(f"[article-realtime-debug-error] {type(_re).__name__}: {_re}", file=sys.stderr)
+
+            try:
                 _doc_url = "https://redfox.hk/apis/gongzhonghao/I3CIBRI2"
                 _doc = requests.get(_doc_url, timeout=20, headers={"User-Agent": USER_AGENT})
                 _html = _doc.text
