@@ -33,6 +33,13 @@
       },
       "last_backend": "redfox",
       "_extract_nonce": "realtime-article-final-20260928"
+    },
+    {
+      "query": "",
+      "seed_url": "https://mp.weixin.qq.com/s/mFUNtFin55uuUlIbcEhOmg",
+      "name": "__one_shot_extract__",
+      "enabled": false,
+      "_extract_nonce": "chatgpt-one-shot-20260929-1826"
     }
   ]
 }
