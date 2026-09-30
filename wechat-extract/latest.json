@@ -1,0 +1,14 @@
+{
+  "status": "ok",
+  "extractor": "direct-http",
+  "title": "帮大家总结了一下凌晨的OpenAI 2026开发者大会。",
+  "author": "数字生命卡兹克",
+  "published_at": "2026-09-29T21:46+00:00",
+  "url": "https://mp.weixin.qq.com/s/h9NZURE7dASUvwJaFcjbRg",
+  "fetched_at": "2026-09-30T01:08:32.467472+00:00",
+  "content_chars": 6558,
+  "image_count": 46,
+  "excerpt": "刚刚，OpenAI开完了他们的DevDay 2026。\n\n也就是他们一年一度的开发者大会。\n\n这一次发布会发布的东西非常的多，几乎是面面俱到。\n\n我也通宵给大家蹲完，然后整理完了。\n\n希望对大家有用。\n\n一. Dots：OpenAI的个人Agent\n\n今天发布会第一个，也是OpenAI自己放在最前面的产品。\n\n叫：Dots。\n\n简单来说，就是一个24小时在线、知道你在干什么、还能主动替你做事的个人Agent。\n\n直接对标的就是Grok Bot和Muse，最近Muse爆火，前段时间直接登顶APP Store，所谓的Personal Agent也是现在市场最关注的Agent类型。\n\n如果一定要用一个大家最熟悉的产品来解释的话。\n\n那就是部署在云端的小龙虾，一个OpenClaw。\n\n没想到吧？半年之后，这个市场又活成了小龙虾的样子。\n\nMuse的人其实也说，他们的产品从OpenClaw那儿获得了极大的灵感。\n\n可能很多人不知道啊，从血统上来说，OpenAI其实一直才是OpenClaw最正统的继任者，毕竟，OpenClaw的作者Peter今年2月就已经入职OpenAI了。。。\n\n只不过OpenAI有点慢的出奇了，在Muse和Grok Bot火了之后，才开始推出自己家的个人Agent，可自己明明有这个市场上最早也是最前沿的那个作者。\n\n而跟OpenClaw最大的区别呢，就是如今的每一个Dot",
+  "attempts": [],
+  "run_id": "36653629893"
+}
