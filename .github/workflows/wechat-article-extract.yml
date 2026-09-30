@@ -1,0 +1,146 @@
+name: WeChat Article Extract
+
+on:
+  workflow_dispatch:
+    inputs:
+      article_url:
+        description: "公开微信公众号文章 URL"
+        required: true
+        type: string
+  push:
+    paths:
+      - "requests/wechat-article-url.txt"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wechat-article-extract
+  cancel-in-progress: false
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve article URL
+        id: input
+        shell: bash
+        env:
+          DISPATCH_URL: ${{ inputs.article_url }}
+        run: |
+          set -euo pipefail
+          url="${DISPATCH_URL:-}"
+          if [ -z "$url" ]; then
+            url="$(tr -d '\r\n' < requests/wechat-article-url.txt)"
+          fi
+          case "$url" in
+            https://mp.weixin.qq.com/*) ;;
+            *) echo "Only https://mp.weixin.qq.com/ URLs are accepted"; exit 2 ;;
+          esac
+          printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install open-source browser fallback
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "git+https://github.com/xiguawang/wechat-reader.git@2d590dd74b2f5ce9f2ac716a5b5571df34ea1844"
+          python -m playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb
+
+      - name: Extract article
+        shell: bash
+        env:
+          ARTICLE_URL: ${{ steps.input.outputs.url }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/wechat-extract
+          xvfb-run -a python tools/wechat_article_extract.py "$ARTICLE_URL" \
+            --strategy auto \
+            --browser-strategy playwright \
+            --timeout 30 \
+            --out-json /tmp/wechat-extract/result.json \
+            --out-md /tmp/wechat-extract/article.md
+
+      - name: Publish safe status page data
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          source = json.loads(Path("/tmp/wechat-extract/result.json").read_text("utf-8"))
+          content = str(source.get("content") or "")
+          safe = {
+              "status": source.get("status"),
+              "extractor": source.get("extractor"),
+              "title": source.get("title"),
+              "author": source.get("author"),
+              "published_at": source.get("published_at"),
+              "url": source.get("url"),
+              "fetched_at": source.get("fetched_at"),
+              "content_chars": len(content),
+              "image_count": len(source.get("images") or []),
+              "excerpt": content[:600],
+              "attempts": source.get("attempts") or [],
+              "run_id": "${{ github.run_id }}",
+          }
+          Path("wechat-extract").mkdir(parents=True, exist_ok=True)
+          Path("wechat-extract/latest.json").write_text(
+              json.dumps(safe, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload full extraction artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wechat-article-${{ github.run_id }}
+          path: |
+            /tmp/wechat-extract/result.json
+            /tmp/wechat-extract/article.md
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Commit status metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add wechat-extract/latest.json
+          if git diff --cached --quiet; then
+            echo "No status changes."
+            exit 0
+          fi
+          git commit -m "chore: update WeChat extraction status [skip ci]"
+          git pull --rebase
+          git push
+
+      - name: Summary
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          d = json.loads(Path("wechat-extract/latest.json").read_text("utf-8"))
+          print("## WeChat article extraction")
+          print()
+          print(f"- Status: **{d.get('status')}**")
+          print(f"- Extractor: {d.get('extractor')}")
+          print(f"- Title: {d.get('title') or '(unavailable)'}")
+          print(f"- Body chars: {d.get('content_chars')}")
+          print(f"- Images: {d.get('image_count')}")
+          print()
+          print("The full JSON/Markdown output is stored as a 1-day workflow artifact.")
+          PY
