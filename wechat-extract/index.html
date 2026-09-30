@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>微信公众号文章提取器</title>
+<style>
+:root{color-scheme:light dark;--bg:#f6f7f9;--card:#fff;--fg:#18181b;--muted:#71717a;--line:#e4e4e7;--accent:#16a34a}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#17191f;--fg:#f4f4f5;--muted:#a1a1aa;--line:#30333a;--accent:#4ade80}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6}
+main{max-width:920px;margin:auto;padding:42px 18px 80px}h1{font-size:clamp(30px,5vw,48px);margin:0 0 8px}.sub{color:var(--muted);margin-bottom:26px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;margin:14px 0}.row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.badge{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:13px}.ok{color:var(--accent)}.bad{color:#f97316}
+a{color:#3b82f6;text-decoration:none}code{background:rgba(127,127,127,.12);padding:2px 5px;border-radius:5px}.excerpt{white-space:pre-wrap;margin-top:16px}
+small,.muted{color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<h1>微信公众号文章提取器</h1>
+<p class="sub">免费开源 · Direct HTTP → wechat-reader / Playwright · 不依赖 RedFox · 不绕过验证码</p>
+
+<section class="card">
+  <div class="row">
+    <div>
+      <strong>如何使用</strong>
+      <div class="muted">GitHub Actions → WeChat Article Extract → Run workflow，粘贴公众号文章 URL。</div>
+    </div>
+    <a href="https://github.com/whichow/whichow.github.io/actions/workflows/wechat-article-extract.yml">打开 Actions</a>
+  </div>
+</section>
+
+<section class="card" id="latest">
+  <div class="row"><strong>最近一次提取</strong><span class="badge" id="status">读取中…</span></div>
+  <h2 id="title">—</h2>
+  <div class="muted" id="meta"></div>
+  <div class="excerpt" id="excerpt"></div>
+  <p id="diag" class="muted"></p>
+</section>
+
+<section class="card">
+  <strong>说明</strong>
+  <p>完整正文不会永久发布到这个公开 Pages 站点，只保留在对应 workflow 的 1 天 Artifact 中；这里展示标题、短摘要和诊断状态。</p>
+  <p>如果云端遇到微信“环境异常/去验证”，在桌面端使用仓库里的 <code>tools/wechat_article_extract.py</code>，配合真实 Chrome/CDP 会更稳定。</p>
+</section>
+
+<script>
+(async()=>{
+  const status=document.getElementById('status');
+  try{
+    const r=await fetch('./latest.json?ts='+Date.now(),{cache:'no-store'});
+    if(!r.ok) throw new Error('暂无结果');
+    const d=await r.json();
+    status.textContent=d.status||'unknown';
+    status.classList.add(d.status==='ok'?'ok':'bad');
+    document.getElementById('title').textContent=d.title||'未获取到标题';
+    const bits=[];
+    if(d.author)bits.push(d.author);
+    if(d.published_at)bits.push(d.published_at);
+    if(d.extractor)bits.push('提取器：'+d.extractor);
+    bits.push('正文字符：'+(d.content_chars||0));
+    bits.push('图片：'+(d.image_count||0));
+    document.getElementById('meta').textContent=bits.join(' · ');
+    document.getElementById('excerpt').textContent=d.excerpt||'';
+    if(Array.isArray(d.attempts)&&d.attempts.length){
+      document.getElementById('diag').textContent='诊断：'+d.attempts.map(x=>x.extractor+': '+x.status+' '+(x.message||'')).join(' | ');
+    }
+  }catch(e){
+    status.textContent='暂无结果';
+    status.classList.add('bad');
+    document.getElementById('title').textContent=String(e.message||e);
+  }
+})();
+</script>
+</main>
+</body>
+</html>
