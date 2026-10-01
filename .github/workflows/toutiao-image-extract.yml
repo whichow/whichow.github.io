@@ -44,9 +44,18 @@ jobs:
         shell: bash
         run: |
           test -s output/result.json
-          COUNT="$(find output/images -maxdepth 1 -type f | wc -l)"
-          test "$COUNT" -gt 0
-          echo "Validated $COUNT image(s)."
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r = json.loads(Path("output/result.json").read_text(encoding="utf-8"))
+          candidate = int(r.get("candidate_count") or 0)
+          downloaded = int(r.get("image_count") or 0)
+          errors = r.get("errors") or []
+          assert candidate > 0, "no image candidates found"
+          assert downloaded == candidate, f"downloaded {downloaded}/{candidate} images"
+          assert not errors, f"errors present: {errors}"
+          print(f"Validated {downloaded}/{candidate} image(s).")
+          PY
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
