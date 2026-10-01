@@ -125,7 +125,10 @@ def choose_item_url(item: Any) -> str:
             elif isinstance(entry, str):
                 values.append(entry)
     for value in values:
-        url = decode_repeated(value)
+        # RENDER_DATA has already been URL-decoded before JSON parsing.
+        # Preserve percent-encoded query characters in signed CDN URLs
+        # (notably %2B / %2F in x-signature), otherwise Toutiao may return 403.
+        url = html_lib.unescape(value).replace("\\/", "/")
         if url.startswith(("http://", "https://")):
             return url
     return ""
