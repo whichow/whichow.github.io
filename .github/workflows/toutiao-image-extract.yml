@@ -1,0 +1,57 @@
+name: Toutiao Image Extractor
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Toutiao short link or image/gallery URL"
+        required: true
+        type: string
+  repository_dispatch:
+    types: [extract_toutiao_images]
+  workflow_call:
+    inputs:
+      url:
+        description: "Toutiao short link or image/gallery URL"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  TOUTIAO_URL: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.url || inputs.url }}
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract Toutiao images
+        shell: bash
+        run: |
+          python3 --version
+          rm -rf output
+          python3 tools/toutiao_image_extract.py "$TOUTIAO_URL" --out output
+          cat output/result.json
+          find output -maxdepth 2 -type f -printf '%p %s bytes\n'
+
+      - name: Validate output
+        shell: bash
+        run: |
+          test -s output/result.json
+          COUNT="$(find output/images -maxdepth 1 -type f | wc -l)"
+          test "$COUNT" -gt 0
+          echo "Validated $COUNT image(s)."
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toutiao-images-${{ github.run_id }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 7
