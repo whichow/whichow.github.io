@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Lightweight Toutiao image / gallery extractor.
+Standalone lightweight Toutiao image / gallery extractor.
 
-This is intentionally separate from the video extractor:
+Intentionally independent from tools/toutiao_video_extract.py:
 - no ffmpeg
 - no yt-dlp
 - no Whisper
-- stdlib only
-
-Flow:
-1) Resolve m.toutiao.com short link.
-2) Parse RENDER_DATA from the final Toutiao page.
-3) Prefer originImageList, then largeImageList.
-4) Download every image and emit result.json.
+- Python standard library only
 """
 from __future__ import annotations
 
@@ -32,7 +26,7 @@ UA_MOBILE = (
 )
 
 RENDER_RE = re.compile(
-    r'<script[^>]*\\bid=["\\']RENDER_DATA["\\'][^>]*>(.*?)</script>',
+    r"""<script[^>]*\bid=["']RENDER_DATA["'][^>]*>(.*?)</script>""",
     re.I | re.S,
 )
 
@@ -107,6 +101,15 @@ def first_text(data: Any, keys: list[str]) -> str:
     return ""
 
 
+def get_nested(data: Any, path: list[str]) -> Any:
+    cur = data
+    for key in path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+    return cur
+
+
 def choose_item_url(item: Any) -> str:
     if not isinstance(item, dict):
         return ""
@@ -179,7 +182,10 @@ def main() -> int:
         final_url, body, content_type = fetch(args.url)
     except Exception as e:
         report["errors"].append(f"page fetch failed: {type(e).__name__}: {e}")
-        (out / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        (out / "result.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         return 2
 
     report["resolved_url"] = final_url
@@ -193,13 +199,18 @@ def main() -> int:
     items: list[Any] = []
     source_field: str | None = None
     if data is not None:
+        thread_base = get_nested(data, ["articleInfo", "thread", "threadBase"])
+        if isinstance(thread_base, dict):
+            report["title"] = str(thread_base.get("title") or "")
+            report["content"] = str(thread_base.get("content") or "")
+            report["gid"] = str(thread_base.get("threadId") or "")
+        if not report.get("title"):
+            report["title"] = first_text(data, ["shareTitle", "title", "abstract"])
+
         source_field, items = first_nonempty_list(
             data,
             ["originImageList", "largeImageList", "ugcCutImageList", "thumbImageList"],
         )
-        report["title"] = first_text(data, ["title", "shareTitle", "abstract"])
-        report["content"] = first_text(data, ["content"])
-        report["gid"] = first_text(data, ["gid", "idStr"])
 
     candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -220,7 +231,12 @@ def main() -> int:
         for url in fallback_image_urls(page):
             if url not in seen:
                 seen.add(url)
-                candidates.append({"url": url, "width": None, "height": None, "uri": None})
+                candidates.append({
+                    "url": url,
+                    "width": None,
+                    "height": None,
+                    "uri": None,
+                })
 
     report["source_field"] = source_field
     report["candidate_count"] = len(candidates)
@@ -248,7 +264,9 @@ def main() -> int:
                 "content_type": img_type,
             })
         except Exception as e:
-            report["errors"].append(f"image {idx} failed: {type(e).__name__}: {e}")
+            report["errors"].append(
+                f"image {idx} failed: {type(e).__name__}: {e}"
+            )
 
     report["image_count"] = len(report["images"])
     (out / "result.json").write_text(
