@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: "Douyin share URL"
+        description: "Douyin share URL or share text"
         required: true
         type: string
 
@@ -14,7 +14,8 @@ permissions:
 jobs:
   extract:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 12
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,72 +23,113 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "22.20.0"
 
-      - name: Prepare pinned open-source parser
+      - name: Prepare pinned Shiying parser
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf /tmp/douyin-video-parser
-          git clone https://github.com/ldsoy/douyin-video-parser.git /tmp/douyin-video-parser
-          cd /tmp/douyin-video-parser
-          git checkout 2ebcb268d706a392de77301855aba9306d04cc84
-          npm install --no-audit --no-fund
+          corepack enable
+          corepack prepare pnpm@11.9.0 --activate
+          rm -rf /tmp/shiying
+          git clone https://github.com/xlongDev/shiying.git /tmp/shiying
+          cd /tmp/shiying
+          git checkout 06be9ed13440683b5c9bc6158ffccd9745159804
+          pnpm install --frozen-lockfile
 
-      - name: Start parser
+      - name: Detect Chrome
         shell: bash
         run: |
           set -euo pipefail
-          cd /tmp/douyin-video-parser
-          nohup npx wrangler dev --local --ip 127.0.0.1 --port 8787 >/tmp/douyin-worker.log 2>&1 &
-          echo $! >/tmp/douyin-worker.pid
-          for i in {1..30}; do
-            curl -fsS http://127.0.0.1:8787/api/health >/dev/null 2>&1 && exit 0
+          CHROME=""
+          for p in /usr/bin/google-chrome /usr/bin/google-chrome-stable /usr/bin/chromium /usr/bin/chromium-browser; do
+            if [ -x "$p" ]; then CHROME="$p"; break; fi
+          done
+          if [ -z "$CHROME" ]; then
+            echo "Chrome not found on runner"
+            exit 1
+          fi
+          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
+          echo "Using $CHROME"
+
+      - name: Start parser service
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/shiying
+          nohup pnpm exec next dev -H 127.0.0.1 -p 3000 >/tmp/shiying.log 2>&1 &
+          echo $! >/tmp/shiying.pid
+          for i in {1..90}; do
+            if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+              exit 0
+            fi
             sleep 1
           done
-          cat /tmp/douyin-worker.log
+          cat /tmp/shiying.log || true
           exit 1
 
-      - name: Parse and download
+      - name: Extract Douyin media
         shell: bash
         env:
-          INPUT_URL: ${{ inputs.url }}
+          RAW_INPUT: ${{ inputs.url }}
         run: |
           set -euo pipefail
           rm -rf output
           mkdir -p output
 
-          ENC_URL="$(python3 - <<'PY'
-          import os, urllib.parse
-          print(urllib.parse.quote(os.environ["INPUT_URL"], safe=""))
+          python3 - <<'PY' > /tmp/request.json
+          import json, os, re
+          text=os.environ["RAW_INPUT"]
+          m=re.search(r'https?://(?:v\.)?douyin\.com/[^\s]+', text)
+          if not m:
+              m=re.search(r'https?://www\.douyin\.com/[^\s]+', text)
+          if not m:
+              raise SystemExit("No Douyin URL found")
+          url=m.group(0).rstrip('，。,.!！?？;；')
+          print(json.dumps({"url":url,"skipLivePhoto":True},ensure_ascii=False))
           PY
-          )"
-          curl -fsS "http://127.0.0.1:8787/api/parse?url=$ENC_URL" -o output/api_response.json
+
+          curl -sS -X POST             -H "Content-Type: application/json"             --data-binary @/tmp/request.json             "http://127.0.0.1:3000/api/parse?skipLivePhoto=true"             -o output/api_response.json
 
           python3 - <<'PY'
           import json, pathlib
-          obj=json.loads(pathlib.Path("output/api_response.json").read_text(encoding="utf-8"))
-          if not obj.get("success"):
+          p=pathlib.Path("output/api_response.json")
+          obj=json.loads(p.read_text(encoding="utf-8"))
+          if not obj.get("ok"):
               print(json.dumps(obj,ensure_ascii=False,indent=2))
-              raise SystemExit("parse failed")
-          data=obj["data"]
-          if not data.get("videoId") or not data.get("playAddr"):
-              raise SystemExit("missing videoId/playAddr")
-          pathlib.Path("output/result.json").write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding="utf-8")
-          pathlib.Path("/tmp/play_url.txt").write_text(data["playAddr"],encoding="utf-8")
-          print(json.dumps({"videoId":data.get("videoId"),"desc":data.get("desc"),"duration":data.get("duration"),"author":(data.get("author") or {}).get("nickname")},ensure_ascii=False,indent=2))
+              raise SystemExit("Douyin parse failed")
+          d=obj.get("data") or {}
+          if not d.get("awemeId"):
+              raise SystemExit("missing awemeId")
+          if d.get("isImagePost"):
+              raise SystemExit("Current extractor is video-only; got image post")
+          if not d.get("videoUrl"):
+              raise SystemExit("missing videoUrl")
+          pathlib.Path("output/result.json").write_text(
+              json.dumps(d,ensure_ascii=False,indent=2),
+              encoding="utf-8"
+          )
+          pathlib.Path("/tmp/video_url.txt").write_text(d["videoUrl"],encoding="utf-8")
+          print(json.dumps({
+              "awemeId":d.get("awemeId"),
+              "desc":d.get("desc"),
+              "author":(d.get("author") or {}).get("name"),
+              "duration":d.get("duration"),
+              "contentType":d.get("contentType")
+          },ensure_ascii=False,indent=2))
           PY
 
-          ENC_PLAY="$(python3 - <<'PY'
+          ENC_VIDEO="$(python3 - <<'PY'
           import pathlib, urllib.parse
-          u=pathlib.Path("/tmp/play_url.txt").read_text(encoding="utf-8")
+          u=pathlib.Path("/tmp/video_url.txt").read_text(encoding="utf-8")
           print(urllib.parse.quote(u,safe=""))
           PY
           )"
-          curl -fL --retry 3 --retry-all-errors "http://127.0.0.1:8787/api/proxy?url=$ENC_PLAY" -o output/video.mp4
-          test -s output/video.mp4
 
-          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,codec_type,width,height -of json output/video.mp4 > output/media_info.json || true
+          curl -fL --retry 3 --retry-all-errors             "http://127.0.0.1:3000/api/stream?url=$ENC_VIDEO"             -o output/video.mp4
+
+          test -s output/video.mp4
+          ffprobe -v error             -show_entries format=duration,size             -show_entries stream=codec_name,codec_type,width,height             -of json output/video.mp4 > output/media_info.json || true
 
       - name: Validate output
         shell: bash
@@ -98,9 +140,10 @@ jobs:
           python3 - <<'PY'
           import json, pathlib
           r=json.loads(pathlib.Path("output/result.json").read_text(encoding="utf-8"))
-          assert r.get("videoId")
-          assert pathlib.Path("output/video.mp4").stat().st_size > 10000
-          print("Validated", r["videoId"], pathlib.Path("output/video.mp4").stat().st_size)
+          n=pathlib.Path("output/video.mp4").stat().st_size
+          assert r.get("awemeId")
+          assert n > 10000
+          print(f"Validated {r['awemeId']} - {n} bytes")
           PY
 
       - name: Upload extraction artifact
@@ -110,6 +153,6 @@ jobs:
           name: douyin-extract-${{ github.run_id }}
           path: |
             output/
-            /tmp/douyin-worker.log
+            /tmp/shiying.log
           if-no-files-found: warn
           retention-days: 7
