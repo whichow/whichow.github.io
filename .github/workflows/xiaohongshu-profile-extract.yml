@@ -1,0 +1,111 @@
+name: Xiaohongshu Profile Extractor
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Xiaohongshu profile share URL or full share text"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare profile parser
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/xhs-profile
+          git clone https://github.com/xinzhuwang-wxz/xhs-extract-master.git /tmp/xhs-profile
+          cd /tmp/xhs-profile
+          git checkout b05a21ffc9c260f71a478a02b433aa06ba6e8441
+          python -m pip install --upgrade pip
+          python -m pip install requests
+
+      - name: Extract profile and visible notes
+        shell: bash
+        env:
+          RAW_INPUT: ${{ inputs.url }}
+        run: |
+          set -euo pipefail
+          rm -rf output
+          mkdir -p output
+          python tools/xiaohongshu_profile_extract.py "$RAW_INPUT"             --profile-script /tmp/xhs-profile/scripts/xiaohongshu_extract.py             --out output
+          cat output/profile.json
+
+      - name: Prepare pinned Shizhen media parser
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/shizhen
+          git clone https://github.com/hiyufan/shizhen.git /tmp/shizhen
+          cd /tmp/shizhen
+          git checkout f25a6a7da753e71888a3fec00b8b4a85610f890e
+          python -m pip install -e .
+
+      - name: Extract latest public note media
+        shell: bash
+        env:
+          PYTHONPATH: /tmp/shizhen/src
+        run: |
+          set -euo pipefail
+          URL="$(cat output/latest_note_url.txt)"
+          if [ -n "$URL" ]; then
+            python tools/xiaohongshu_extract.py "$URL" --out output/latest_note
+          fi
+          find output -maxdepth 3 -type f -printf '%p %s bytes\n'
+
+      - name: Validate output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s output/profile.json
+          python - <<'PY'
+          import json, pathlib
+          p = pathlib.Path("output/profile.json")
+          r = json.loads(p.read_text(encoding="utf-8"))
+          assert not (r.get("errors") or []), r.get("errors")
+          assert r.get("user_id") or r.get("red_id"), "missing profile id"
+          assert isinstance(r.get("notes"), list), "notes list missing"
+          latest = pathlib.Path("output/latest_note/result.json")
+          if r.get("latest_note_url"):
+              assert latest.exists(), "latest note media result missing"
+              nr = json.loads(latest.read_text(encoding="utf-8"))
+              assert not (nr.get("errors") or []), nr.get("errors")
+          print("Xiaohongshu profile output validated")
+          PY
+
+      - name: Package profile bundle
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd output
+          zip -qr ../xiaohongshu-profile-bundle.zip .
+          cd ..
+          test -s xiaohongshu-profile-bundle.zip
+
+      - name: Upload extraction artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiaohongshu-profile-${{ github.run_id }}
+          path: |
+            output/
+            xiaohongshu-profile-bundle.zip
+          if-no-files-found: warn
+          retention-days: 7
