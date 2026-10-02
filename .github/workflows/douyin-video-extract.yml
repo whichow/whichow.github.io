@@ -32,7 +32,7 @@ jobs:
           git clone https://github.com/ldsoy/douyin-video-parser.git /tmp/douyin-video-parser
           cd /tmp/douyin-video-parser
           git checkout 2ebcb268d706a392de77301855aba9306d04cc84
-          npm ci
+          npm install --no-audit --no-fund
 
       - name: Start parser
         shell: bash
