@@ -34,6 +34,20 @@ jobs:
           cd /tmp/DyExtract
           git checkout 26e737098b01350a4f58a04e04a8878726db39ee
 
+      - name: Prepare Live Photo resolver
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/dyjx /tmp/dyjx-venv /tmp/playwright-browsers
+          git clone https://github.com/mubaiqq/dyjx.git /tmp/dyjx
+          cd /tmp/dyjx
+          git checkout f477bff896f8ce42f7ba91e7c210262883489a70
+          python3 -m venv /tmp/dyjx-venv
+          /tmp/dyjx-venv/bin/pip install --upgrade pip
+          /tmp/dyjx-venv/bin/pip install playwright
+          PLAYWRIGHT_BROWSERS_PATH=/tmp/playwright-browsers \
+            /tmp/dyjx-venv/bin/python -m playwright install chromium
+
       - name: Extract Douyin images
         shell: bash
         env:
@@ -44,6 +58,19 @@ jobs:
           node tools/douyin_image_extract.cjs "${{ inputs.url }}" output
           cat output/result.json
           find output -maxdepth 2 -type f -printf '%p %s bytes\n'
+
+      - name: Enrich Douyin Live Photos
+        shell: bash
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /tmp/playwright-browsers
+        run: |
+          set -euo pipefail
+          /tmp/dyjx-venv/bin/python tools/douyin_live_enrich.py \
+            --result output/result.json \
+            --resolver /tmp/dyjx/extract_live_photos.py \
+            --python /tmp/dyjx-venv/bin/python
+          cat output/result.json
+          find output/live -maxdepth 1 -type f -printf '%p %s bytes\n' || true
 
       - name: Validate output
         shell: bash
