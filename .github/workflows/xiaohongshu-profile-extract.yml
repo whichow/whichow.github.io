@@ -80,11 +80,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          UID="$(cat output/user_id.txt)"
+          XHS_UID="$(cat output/user_id.txt)"
           export XHS_CACHE_DIR=/tmp/xhs-cache
           export XHS_CONFIG_DIR=/tmp/xhs-config
-          /tmp/xhs -o json user "$UID" > output/profile_cli.json
-          /tmp/xhs -o json -n 20 user "$UID" --notes > output/notes_cli.json
+          /tmp/xhs -o json user "$XHS_UID" > output/profile_cli.json
+          /tmp/xhs -o json -n 20 user "$XHS_UID" --notes > output/notes_cli.json
           cat output/profile_cli.json
           cat output/notes_cli.json
 
