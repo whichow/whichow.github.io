@@ -1,0 +1,13 @@
+name: Toutiao Image Request Bridge
+
+on:
+  push:
+    paths:
+      - ".requests/toutiao-image-*"
+
+jobs:
+  extract:
+    uses: ./.github/workflows/toutiao-image-extract.yml
+    with:
+      url: ${{ github.event.head_commit.message }}
+    secrets: inherit
