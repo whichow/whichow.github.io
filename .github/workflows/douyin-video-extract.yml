@@ -14,22 +14,102 @@ permissions:
 jobs:
   extract:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Extract Douyin video
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Prepare pinned open-source parser
         shell: bash
         run: |
+          set -euo pipefail
+          rm -rf /tmp/douyin-video-parser
+          git clone https://github.com/ldsoy/douyin-video-parser.git /tmp/douyin-video-parser
+          cd /tmp/douyin-video-parser
+          git checkout 2ebcb268d706a392de77301855aba9306d04cc84
+          npm ci
+
+      - name: Start parser
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/douyin-video-parser
+          nohup npx wrangler dev --local --ip 127.0.0.1 --port 8787 >/tmp/douyin-worker.log 2>&1 &
+          echo $! >/tmp/douyin-worker.pid
+          for i in {1..30}; do
+            curl -fsS http://127.0.0.1:8787/api/health >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          cat /tmp/douyin-worker.log
+          exit 1
+
+      - name: Parse and download
+        shell: bash
+        env:
+          INPUT_URL: ${{ inputs.url }}
+        run: |
+          set -euo pipefail
           rm -rf output
-          python3 tools/douyin_video_extract.py "${{ inputs.url }}" --out output
-          cat output/result.json
+          mkdir -p output
+
+          ENC_URL="$(python3 - <<'PY'
+          import os, urllib.parse
+          print(urllib.parse.quote(os.environ["INPUT_URL"], safe=""))
+          PY
+          )"
+          curl -fsS "http://127.0.0.1:8787/api/parse?url=$ENC_URL" -o output/api_response.json
+
+          python3 - <<'PY'
+          import json, pathlib
+          obj=json.loads(pathlib.Path("output/api_response.json").read_text(encoding="utf-8"))
+          if not obj.get("success"):
+              print(json.dumps(obj,ensure_ascii=False,indent=2))
+              raise SystemExit("parse failed")
+          data=obj["data"]
+          if not data.get("videoId") or not data.get("playAddr"):
+              raise SystemExit("missing videoId/playAddr")
+          pathlib.Path("output/result.json").write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding="utf-8")
+          pathlib.Path("/tmp/play_url.txt").write_text(data["playAddr"],encoding="utf-8")
+          print(json.dumps({"videoId":data.get("videoId"),"desc":data.get("desc"),"duration":data.get("duration"),"author":(data.get("author") or {}).get("nickname")},ensure_ascii=False,indent=2))
+          PY
+
+          ENC_PLAY="$(python3 - <<'PY'
+          import pathlib, urllib.parse
+          u=pathlib.Path("/tmp/play_url.txt").read_text(encoding="utf-8")
+          print(urllib.parse.quote(u,safe=""))
+          PY
+          )"
+          curl -fL --retry 3 --retry-all-errors "http://127.0.0.1:8787/api/proxy?url=$ENC_PLAY" -o output/video.mp4
           test -s output/video.mp4
+
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,codec_type,width,height -of json output/video.mp4 > output/media_info.json || true
+
+      - name: Validate output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s output/result.json
+          test -s output/video.mp4
+          python3 - <<'PY'
+          import json, pathlib
+          r=json.loads(pathlib.Path("output/result.json").read_text(encoding="utf-8"))
+          assert r.get("videoId")
+          assert pathlib.Path("output/video.mp4").stat().st_size > 10000
+          print("Validated", r["videoId"], pathlib.Path("output/video.mp4").stat().st_size)
+          PY
+
       - name: Upload extraction artifact
-        uses: actions/upload-artifact@v4
         if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: douyin-extract-${{ github.run_id }}
-          path: output/
-          if-no-files-found: error
+          path: |
+            output/
+            /tmp/douyin-worker.log
+          if-no-files-found: warn
           retention-days: 7
