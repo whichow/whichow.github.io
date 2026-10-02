@@ -1,0 +1,88 @@
+name: Douyin Image Extractor
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Douyin share URL or full share text"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22.20.0"
+
+      - name: Prepare pinned DyExtract
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/DyExtract
+          git clone https://github.com/Hartcher1996/DyExtract.git /tmp/DyExtract
+          cd /tmp/DyExtract
+          git checkout 26e737098b01350a4f58a04e04a8878726db39ee
+
+      - name: Extract Douyin images
+        shell: bash
+        env:
+          DYEXTRACT_CORE: /tmp/DyExtract/lib/core.js
+        run: |
+          set -euo pipefail
+          rm -rf output
+          node tools/douyin_image_extract.cjs "${{ inputs.url }}" output
+          cat output/result.json
+          find output -maxdepth 2 -type f -printf '%p %s bytes\n'
+
+      - name: Validate output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s output/result.json
+          python3 - <<'PY'
+          import json, pathlib
+          p = pathlib.Path("output/result.json")
+          r = json.loads(p.read_text(encoding="utf-8"))
+          c = int(r.get("candidate_count") or 0)
+          d = int(r.get("downloaded_count") or 0)
+          errs = r.get("errors") or []
+          assert r.get("type") == "image", f"unexpected type: {r.get('type')}"
+          assert c > 0, "no image candidates"
+          assert d == c, f"downloaded {d}/{c}"
+          assert not errs, f"errors present: {errs}"
+          files = list(pathlib.Path("output/images").glob("*"))
+          assert len(files) == c, f"file count {len(files)} != {c}"
+          print(f"Validated {d}/{c} Douyin image resources")
+          PY
+
+      - name: Package gallery ZIP
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd output
+          zip -qr ../douyin-gallery.zip images result.json
+          cd ..
+          test -s douyin-gallery.zip
+
+      - name: Upload extraction artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: douyin-images-${{ github.run_id }}
+          path: |
+            output/
+            douyin-gallery.zip
+          if-no-files-found: warn
+          retention-days: 7
