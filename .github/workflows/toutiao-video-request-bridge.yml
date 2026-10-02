@@ -1,0 +1,13 @@
+name: Toutiao Video Request Bridge
+
+on:
+  push:
+    paths:
+      - ".requests/toutiao-video-*"
+
+jobs:
+  extract:
+    uses: ./.github/workflows/toutiao-video-extract.yml
+    with:
+      url: ${{ github.event.head_commit.message }}
+    secrets: inherit
