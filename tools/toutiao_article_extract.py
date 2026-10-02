@@ -500,6 +500,114 @@ def main():
         resolved, short_html = args.url, ""
         report["errors"].append(f"shortlink resolve failed: {type(e).__name__}: {e}")
 
+    # Handle /w/{id}/ Weitoutiao image posts directly from the short-link SSR RENDER_DATA.
+    # These posts are not /article/ pages and may contain only images + a short caption.
+    thread_data = parse_render_data(short_html) if short_html else None
+    thread_base = None
+    if isinstance(thread_data, dict):
+        info = thread_data.get("articleInfo") or thread_data.get("articleinfo") or {}
+        thread = info.get("thread") if isinstance(info, dict) else None
+        if isinstance(thread, dict) and isinstance(thread.get("threadBase"), dict):
+            candidate = thread.get("threadBase")
+            if candidate.get("largeImageList") or candidate.get("content") or candidate.get("title"):
+                thread_base = candidate
+
+    if thread_base is not None:
+        report["article_type"] = "weitoutiao"
+        report["thread_id"] = str(thread_base.get("idStr") or thread_base.get("threadId") or "")
+        report["render_data_found"] = True
+        (out / "shortlink_response.render_data.json").write_text(
+            json.dumps(thread_data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        content = str(thread_base.get("content") or thread_base.get("title") or "").strip()
+        full_title = str(thread_base.get("title") or content or "").strip()
+        display_title = (full_title.splitlines()[0].strip() if full_title else "Toutiao post")
+        paragraphs = [x.strip() for x in content.splitlines() if x.strip()]
+
+        author = ""
+        user = thread_base.get("user")
+        if isinstance(user, dict):
+            info = user.get("info")
+            if isinstance(info, dict):
+                author = str(info.get("name") or "").strip()
+
+        images = []
+        for item in thread_base.get("largeImageList") or []:
+            if not isinstance(item, dict):
+                continue
+            u = _normalize_url(item.get("url") or "")
+            if not u:
+                url_list = item.get("urlList")
+                if isinstance(url_list, list):
+                    for row in url_list:
+                        if isinstance(row, dict):
+                            u = _normalize_url(row.get("url") or "")
+                            if u:
+                                break
+            if u:
+                images.append(u)
+        images = _dedupe_urls(images)
+
+        report.update({
+            "title": full_title or display_title,
+            "author": author,
+            "publish_time": str(thread_base.get("displayCreateTime") or thread_base.get("createTime") or ""),
+            "paragraphs": paragraphs,
+            "images": images,
+            "source": "shortlink_response.html:render_data.thread",
+            "text_chars": len("\n".join(paragraphs)),
+            "paragraph_count": len(paragraphs),
+            "image_count": len(images),
+        })
+
+        downloaded = []
+        if os.getenv("DOWNLOAD_IMAGES", "1").strip() != "0":
+            for i, url in enumerate(images, 1):
+                try:
+                    headers = {
+                        "User-Agent": UA_DESKTOP,
+                        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                        "Referer": resolved,
+                    }
+                    kwargs = {"headers": headers, "allow_redirects": True, "timeout": 60}
+                    if crequests is not None and s.__class__.__module__.startswith("curl_cffi"):
+                        kwargs["impersonate"] = "chrome"
+                    ir = s.get(url, **kwargs)
+                    ir.raise_for_status()
+                    ctype = (ir.headers.get("content-type") or "").lower()
+                    suffix = ".png" if "png" in ctype else (".webp" if "webp" in ctype else ".jpg")
+                    dest = out / f"image_{i:02d}{suffix}"
+                    dest.write_bytes(ir.content)
+                    downloaded.append({
+                        "index": i,
+                        "path": str(dest),
+                        "bytes": len(ir.content),
+                        "content_type": ctype,
+                        "final_url": str(ir.url),
+                    })
+                except Exception as e:
+                    report["errors"].append(f"image {i} download failed: {type(e).__name__}: {e}")
+        report["downloaded_images"] = downloaded
+
+        md = [f"# {display_title}", ""]
+        if author:
+            md.append(f"- 作者：{author}")
+        md.append(f"- 原文：{resolved}")
+        md.append("")
+        md.extend(paragraphs)
+        if images:
+            md.extend(["", "## 图片"])
+            md.extend(f"- {u}" for u in images)
+        (out / "article.md").write_text("\n\n".join(md), encoding="utf-8")
+        (out / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        print("===== RESULT =====")
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        print("===== ARTICLE =====")
+        print((out / "article.md").read_text(encoding="utf-8"))
+        return 0 if paragraphs or images else 3
+
     article_id = get_article_id(resolved, short_html, args.url)
     report["article_id"] = article_id
     if not article_id:
