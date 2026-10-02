@@ -1,0 +1,99 @@
+name: Pipixia Extractor
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Pipixia share URL or full share text"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare pinned Shizhen parser
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/shizhen
+          git clone https://github.com/hiyufan/shizhen.git /tmp/shizhen
+          cd /tmp/shizhen
+          git checkout f25a6a7da753e71888a3fec00b8b4a85610f890e
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Extract Pipixia media
+        shell: bash
+        env:
+          RAW_INPUT: ${{ inputs.url }}
+          PYTHONPATH: /tmp/shizhen/src
+        run: |
+          set -euo pipefail
+          rm -rf output
+          python tools/pipixia_extract.py "$RAW_INPUT" --out output
+          cat output/result.json
+          find output -maxdepth 2 -type f -printf '%p %s bytes\n'
+
+      - name: Probe video
+        if: success()
+        shell: bash
+        run: |
+          if [ -s output/video.mp4 ]; then
+            ffprobe -v error               -show_entries format=duration,size               -show_entries stream=codec_name,codec_type,width,height               -of json output/video.mp4 > output/media_info.json || true
+          fi
+
+      - name: Validate output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s output/result.json
+          python - <<'PY'
+          import json, pathlib
+          r = json.loads(pathlib.Path("output/result.json").read_text(encoding="utf-8"))
+          errs = r.get("errors") or []
+          assert not errs, errs
+          if r.get("type") == "video":
+              p = pathlib.Path("output/video.mp4")
+              assert p.exists() and p.stat().st_size > 10000
+          else:
+              c = int(r.get("image_count") or 0)
+              d = int(r.get("downloaded_image_count") or 0)
+              assert c > 0, "no images"
+              assert d == c, f"images {d}/{c}"
+          print("Pipixia output validated")
+          PY
+
+      - name: Package media ZIP
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd output
+          zip -qr ../pipixia-media.zip .
+          cd ..
+          test -s pipixia-media.zip
+
+      - name: Upload extraction artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipixia-extract-${{ github.run_id }}
+          path: |
+            output/
+            pipixia-media.zip
+          if-no-files-found: warn
+          retention-days: 7
