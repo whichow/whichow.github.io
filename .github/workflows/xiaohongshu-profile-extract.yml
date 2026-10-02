@@ -14,7 +14,7 @@ permissions:
 jobs:
   extract:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -25,18 +25,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Prepare profile parser
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf /tmp/xhs-profile
-          git clone https://github.com/xinzhuwang-wxz/xhs-extract-master.git /tmp/xhs-profile
-          cd /tmp/xhs-profile
-          git checkout b05a21ffc9c260f71a478a02b433aa06ba6e8441
-          python -m pip install --upgrade pip
-          python -m pip install requests
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
 
-      - name: Extract profile and visible notes
+      - name: Resolve profile share
         shell: bash
         env:
           RAW_INPUT: ${{ inputs.url }}
@@ -44,10 +38,93 @@ jobs:
           set -euo pipefail
           rm -rf output
           mkdir -p output
-          python tools/xiaohongshu_profile_extract.py "$RAW_INPUT"             --profile-script /tmp/xhs-profile/scripts/xiaohongshu_extract.py             --out output
-          cat output/profile.json
+          python -m pip install requests
+          python - <<'PY'
+          import os, re, json, urllib.parse, requests, pathlib
+          raw=os.environ["RAW_INPUT"]
+          m=re.search(r'https?://(?:(?:www\.)?xiaohongshu\.com|(?:www\.)?xhslink\.(?:com|cn))/[^\s]+', raw, re.I)
+          if not m:
+              raise SystemExit("No Xiaohongshu URL found")
+          url=m.group(0).rstrip('，。,.!！?？;；')
+          ua="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
+          r=requests.get(url,headers={"User-Agent":ua},allow_redirects=True,timeout=25)
+          final=r.url
+          target=final
+          q=urllib.parse.parse_qs(urllib.parse.urlparse(final).query)
+          if "/login" in urllib.parse.urlparse(final).path and q.get("redirectPath"):
+              target=urllib.parse.unquote(q["redirectPath"][0])
+          mm=re.search(r'/user/profile/([0-9A-Za-z]+)', target)
+          if not mm:
+              raise SystemExit(f"Resolved target is not a profile: {final}")
+          uid=mm.group(1)
+          pathlib.Path("output/user_id.txt").write_text(uid,encoding="utf-8")
+          pathlib.Path("output/profile_target_url.txt").write_text(target,encoding="utf-8")
+          pathlib.Path("output/resolve.json").write_text(json.dumps({
+              "share_url":url,"final_url":final,"target_url":target,"user_id":uid
+          },ensure_ascii=False,indent=2),encoding="utf-8")
+          print(json.dumps({"user_id":uid,"target_url":target},ensure_ascii=False))
+          PY
+
+      - name: Prepare anonymous XHS CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/xhs-cli
+          git clone https://github.com/tamnd/xiaohongshu-cli.git /tmp/xhs-cli
+          cd /tmp/xhs-cli
+          git checkout b60f9a384ed32d002aaacbbff95fedb2bdc96682
+          go build -o /tmp/xhs ./cmd/xhs
+          /tmp/xhs --help >/dev/null
+
+      - name: Read public profile and first-page notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          UID="$(cat output/user_id.txt)"
+          export XHS_CACHE_DIR=/tmp/xhs-cache
+          export XHS_CONFIG_DIR=/tmp/xhs-config
+          /tmp/xhs -o json user "$UID" > output/profile_cli.json
+          /tmp/xhs -o json -n 20 user "$UID" --notes > output/notes_cli.json
+          cat output/profile_cli.json
+          cat output/notes_cli.json
+
+      - name: Normalize profile result
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, pathlib
+          profile_arr=json.loads(pathlib.Path("output/profile_cli.json").read_text(encoding="utf-8"))
+          notes=json.loads(pathlib.Path("output/notes_cli.json").read_text(encoding="utf-8"))
+          resolve=json.loads(pathlib.Path("output/resolve.json").read_text(encoding="utf-8"))
+          profile=profile_arr[0] if profile_arr else {}
+          latest=notes[0] if notes else None
+          latest_url=(latest or {}).get("url","")
+          out={
+              "share_url":resolve.get("share_url"),
+              "target_url":resolve.get("target_url"),
+              "user_id":resolve.get("user_id"),
+              "profile":profile,
+              "visible_note_count":len(notes),
+              "notes":notes,
+              "latest_note":latest,
+              "latest_note_url":latest_url,
+              "errors":[]
+          }
+          pathlib.Path("output/profile.json").write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding="utf-8")
+          pathlib.Path("output/latest_note_url.txt").write_text(latest_url,encoding="utf-8")
+          print(json.dumps({
+              "nickname":profile.get("nickname"),
+              "fans":profile.get("fans"),
+              "follows":profile.get("follows"),
+              "interaction":profile.get("interaction"),
+              "visible_note_count":len(notes),
+              "latest_note":latest
+          },ensure_ascii=False,indent=2))
+          PY
 
       - name: Prepare pinned Shizhen media parser
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
@@ -58,6 +135,7 @@ jobs:
           python -m pip install -e .
 
       - name: Extract latest public note media
+        if: success()
         shell: bash
         env:
           PYTHONPATH: /tmp/shizhen/src
@@ -70,21 +148,19 @@ jobs:
           find output -maxdepth 3 -type f -printf '%p %s bytes\n'
 
       - name: Validate output
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
-          test -s output/profile.json
           python - <<'PY'
           import json, pathlib
-          p = pathlib.Path("output/profile.json")
-          r = json.loads(p.read_text(encoding="utf-8"))
-          assert not (r.get("errors") or []), r.get("errors")
-          assert r.get("user_id") or r.get("red_id"), "missing profile id"
-          assert isinstance(r.get("notes"), list), "notes list missing"
-          latest = pathlib.Path("output/latest_note/result.json")
+          r=json.loads(pathlib.Path("output/profile.json").read_text(encoding="utf-8"))
+          assert r.get("profile",{}).get("nickname"), "missing nickname"
+          assert isinstance(r.get("notes"),list), "missing notes"
           if r.get("latest_note_url"):
-              assert latest.exists(), "latest note media result missing"
-              nr = json.loads(latest.read_text(encoding="utf-8"))
+              p=pathlib.Path("output/latest_note/result.json")
+              assert p.exists(), "latest note media missing"
+              nr=json.loads(p.read_text(encoding="utf-8"))
               assert not (nr.get("errors") or []), nr.get("errors")
           print("Xiaohongshu profile output validated")
           PY
