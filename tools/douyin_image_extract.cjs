@@ -148,6 +148,114 @@ function liveUrls(img) {
   return unique(candidates.flatMap(urlsFrom)).map(u => u.replace(/playwm/g, 'play'));
 }
 
+function bestLiveVideoUrls(img) {
+  if (!img || typeof img !== 'object') return [];
+  const video = img.video || {};
+  const bitRate = Array.isArray(video.bit_rate) ? video.bit_rate : [];
+  const candidates = [
+    video.play_addr_h264,
+    video.play_addr,
+    ...bitRate.map(x => x && x.play_addr),
+    video.play_addr_lowbr,
+    video.download_addr,
+    img.live_url_list,
+    img.motion_url_list,
+    img.animated_url_list
+  ];
+  return unique(candidates.flatMap(urlsFrom)).map(u => u.replace(/playwm/g, 'play'));
+}
+
+async function fetchAwemeDetail(itemId) {
+  const api = new URL('https://www.douyin.com/aweme/v1/web/aweme/detail/');
+  api.searchParams.set('aweme_id', itemId);
+  api.searchParams.set('aid', '6383');
+
+  let last = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const resp = await fetch(api, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'Origin': 'https://open.douyin.com',
+          'Referer': 'https://open.douyin.com/'
+        },
+        redirect: 'follow'
+      });
+      const text = await resp.text();
+      if (!resp.ok) throw new Error(`aweme detail HTTP ${resp.status}`);
+      let obj;
+      try { obj = JSON.parse(text); } catch { throw new Error('aweme detail returned non-JSON'); }
+      const item = obj.aweme_detail || (obj.data && obj.data.aweme_detail);
+      if (!item || String(item.aweme_id || item.awemeId || '') !== String(itemId)) {
+        throw new Error('aweme detail missing target item');
+      }
+      return item;
+    } catch (e) {
+      last = e;
+      if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 500));
+    }
+  }
+  throw last || new Error('aweme detail failed');
+}
+
+function payloadFromAwemeDetail(item, itemId) {
+  const rawImages = (item.image_post_info && (item.image_post_info.images || item.image_post_info.image_list))
+    || item.images || item.image_list || [];
+  if (!Array.isArray(rawImages) || rawImages.length === 0) {
+    throw new Error('aweme detail contains no image list');
+  }
+
+  const images = [];
+  const live = [];
+  for (let i = 0; i < rawImages.length; i++) {
+    const img = rawImages[i] || {};
+    const staticCandidates = rankedStaticUrls(img);
+    if (staticCandidates.length) {
+      images.push({
+        index: i + 1,
+        url: staticCandidates[0],
+        fallback_urls: staticCandidates.slice(1),
+        width: Number(img.width || img.origin_image?.width || img.display_image?.width || 0),
+        height: Number(img.height || img.origin_image?.height || img.display_image?.height || 0),
+        uri: img.uri || img.origin_image?.uri || '',
+        clip_type: img.clip_type ?? null,
+        live_photo_type: img.live_photo_type ?? null
+      });
+    }
+
+    const motions = bestLiveVideoUrls(img);
+    const isLive = img.live_photo_type === 1 || [3,4,5].includes(img.clip_type) || motions.length > 0;
+    if (isLive && motions.length) {
+      live.push({
+        index: i + 1,
+        url: motions[0],
+        fallback_urls: motions.slice(1),
+        clip_type: img.clip_type ?? null,
+        live_photo_type: img.live_photo_type ?? null,
+        duration: Number(img.video?.duration || 0),
+        width: Number(img.video?.width || 0),
+        height: Number(img.video?.height || 0)
+      });
+    }
+  }
+
+  return {
+    success: true,
+    type: 'image',
+    title: item.desc || item.share_info?.share_title || item.share_info?.share_desc || '',
+    author: item.author?.nickname || item.authorInfo?.nickname || '',
+    item_id: String(item.aweme_id ?? item.awemeId ?? itemId),
+    image_count: images.length,
+    images,
+    live_count: live.length,
+    live,
+    source: 'aweme-detail'
+  };
+}
+
+
 async function fetchSlidesInfo(canonical, itemId) {
   const api = new URL('https://www.iesdouyin.com/web/api/v2/aweme/slidesinfo/');
   api.searchParams.set('aweme_ids', `[${itemId}]`);
@@ -296,18 +404,33 @@ async function fetchBinary(primary, fallbacks, referer) {
   }
 
   let payload;
+  let detailError = null;
   try {
-    if (report.resolved_kind === 'slides') {
-      payload = await fetchSlidesInfo(canonicalInput, report.resolved_item_id);
-    } else {
-      const parsed = await core.buildParseResponse(canonicalInput);
-      payload = parsed && parsed.payload ? parsed.payload : {};
-    }
+    const detail = await fetchAwemeDetail(report.resolved_item_id);
+    payload = payloadFromAwemeDetail(detail, report.resolved_item_id);
+    report.detail_source = 'aweme-detail';
   } catch (e) {
-    report.errors.push(`parse: ${e.message || String(e)}`);
-    fs.writeFileSync(path.join(outDir, 'result.json'), JSON.stringify(report, null, 2));
-    console.error(JSON.stringify(report, null, 2));
-    process.exit(4);
+    detailError = e;
+    console.warn('aweme detail failed, falling back:', e.message || String(e));
+  }
+
+  if (!payload) {
+    try {
+      if (report.resolved_kind === 'slides') {
+        payload = await fetchSlidesInfo(canonicalInput, report.resolved_item_id);
+        report.detail_source = 'slidesinfo-fallback';
+      } else {
+        const parsed = await core.buildParseResponse(canonicalInput);
+        payload = parsed && parsed.payload ? parsed.payload : {};
+        report.detail_source = 'dyextract-fallback';
+      }
+    } catch (e) {
+      report.errors.push(`parse: ${e.message || String(e)}`);
+      if (detailError) report.errors.push(`aweme-detail: ${detailError.message || String(detailError)}`);
+      fs.writeFileSync(path.join(outDir, 'result.json'), JSON.stringify(report, null, 2));
+      console.error(JSON.stringify(report, null, 2));
+      process.exit(4);
+    }
   }
 
   report.payload = payload;
