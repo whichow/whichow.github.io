@@ -56,14 +56,19 @@ jobs:
           r = json.loads(p.read_text(encoding="utf-8"))
           c = int(r.get("candidate_count") or 0)
           d = int(r.get("downloaded_count") or 0)
+          lc = int(r.get("live_candidate_count") or 0)
+          ld = int(r.get("live_downloaded_count") or 0)
           errs = r.get("errors") or []
           assert r.get("type") == "image", f"unexpected type: {r.get('type')}"
           assert c > 0, "no image candidates"
-          assert d == c, f"downloaded {d}/{c}"
+          assert d == c, f"downloaded images {d}/{c}"
+          assert ld == lc, f"downloaded live media {ld}/{lc}"
           assert not errs, f"errors present: {errs}"
           files = list(pathlib.Path("output/images").glob("*"))
-          assert len(files) == c, f"file count {len(files)} != {c}"
-          print(f"Validated {d}/{c} Douyin image resources")
+          live_files = list(pathlib.Path("output/live").glob("*"))
+          assert len(files) == c, f"image file count {len(files)} != {c}"
+          assert len(live_files) == lc, f"live file count {len(live_files)} != {lc}"
+          print(f"Validated images {d}/{c}, live media {ld}/{lc}")
           PY
 
       - name: Package gallery ZIP
@@ -72,7 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           cd output
-          zip -qr ../douyin-gallery.zip images result.json
+          zip -qr ../douyin-gallery.zip images live result.json
           cd ..
           test -s douyin-gallery.zip
 
