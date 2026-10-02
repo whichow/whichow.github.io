@@ -1,6 +1,10 @@
 name: Toutiao Video Extractor
 
 on:
+  push:
+    branches: [toutiao-video-extract-7688644560120971315]
+    paths:
+      - '.github/toutiao-video-trigger.txt'
   workflow_dispatch:
     inputs:
       url:
@@ -19,7 +23,7 @@ permissions:
   contents: read
 
 env:
-  TOUTIAO_URL: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.url || inputs.url || 'https://m.toutiao.com/is/pso4hdMSQQI/' }}
+  TOUTIAO_URL: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.url || inputs.url || 'https://www.toutiao.com/video/7680188614919880738/' }}
 
 jobs:
   extract:
