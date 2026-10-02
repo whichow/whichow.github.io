@@ -1,0 +1,41 @@
+name: Build XHS Anonymous Probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+      - name: Build Windows probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/xhs-probe
+          mkdir -p /tmp/xhs-probe
+          cp tools/xhs_anon_user_posted.go /tmp/xhs-probe/main.go
+          cd /tmp/xhs-probe
+          go mod init xhs-probe
+          go get github.com/tamnd/xiaohongshu-cli@b60f9a384ed32d002aaacbbff95fedb2bdc96682
+          go mod tidy
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o xhs-anon-probe.exe .
+          sha256sum xhs-anon-probe.exe > xhs-anon-probe.exe.sha256
+          ls -lh xhs-anon-probe.exe
+      - name: Upload probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: xhs-anon-probe-windows-amd64
+          path: |
+            /tmp/xhs-probe/xhs-anon-probe.exe
+            /tmp/xhs-probe/xhs-anon-probe.exe.sha256
+          retention-days: 7
