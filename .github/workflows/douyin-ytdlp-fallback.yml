@@ -1,0 +1,72 @@
+name: Douyin yt-dlp Fallback
+
+on:
+  push:
+    paths:
+      - ".requests/douyin-ytdlp-*"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          python3 -m pip install --upgrade yt-dlp
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
+
+      - name: Extract video
+        shell: bash
+        env:
+          RAW_INPUT: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          rm -rf output
+          mkdir -p output
+          yt-dlp \
+            --user-agent "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/140.0.0.0 Mobile Safari/537.36" \
+            --referer "https://www.douyin.com/" \
+            --no-playlist \
+            --write-info-json \
+            --merge-output-format mp4 \
+            -o "output/video.%(ext)s" \
+            "$RAW_INPUT"
+          VID="$(find output -maxdepth 1 -type f -name 'video*.mp4' | head -n1)"
+          test -n "$VID"
+          if [ "$VID" != "output/video.mp4" ]; then mv "$VID" output/video.mp4; fi
+          test -s output/video.mp4
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,codec_type,width,height -of json output/video.mp4 > output/media_info.json
+
+      - name: Normalize metadata
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          p=next(pathlib.Path("output").glob("video.info.json"))
+          d=json.loads(p.read_text(encoding="utf-8"))
+          out={
+              "awemeId": str(d.get("id") or ""),
+              "desc": d.get("description") or d.get("title") or "",
+              "duration": d.get("duration"),
+              "contentType": "video",
+              "author": {"name": d.get("uploader") or d.get("channel") or ""},
+              "source": "yt-dlp"
+          }
+          pathlib.Path("output/result.json").write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding="utf-8")
+          PY
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: douyin-ytdlp-${{ github.run_id }}
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
