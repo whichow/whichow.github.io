@@ -1,0 +1,62 @@
+name: Douyin Public API Fallback
+
+on:
+  push:
+    paths:
+      - ".requests/douyin-publicapi-*"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse and download
+        shell: bash
+        env:
+          RAW_INPUT: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          rm -rf output
+          mkdir -p output
+          curl -fsSLG             --data-urlencode "url=$RAW_INPUT"             "https://api.btstu.cn/dyjx/api.php"             -o output/api_response.json
+          cat output/api_response.json
+          python3 - <<'PY'
+          import json, pathlib
+          p=pathlib.Path("output/api_response.json")
+          obj=json.loads(p.read_text(encoding="utf-8"))
+          if str(obj.get("code"))!="200":
+              raise SystemExit(f"parse failed: {obj}")
+          d=obj.get("data") or {}
+          url=d.get("videourl") or d.get("video_url") or d.get("url")
+          if not url:
+              raise SystemExit("no videourl in response")
+          pathlib.Path("/tmp/video_url.txt").write_text(url,encoding="utf-8")
+          pathlib.Path("output/result.json").write_text(
+              json.dumps({
+                  "title": d.get("title") or "",
+                  "cover": d.get("img") or d.get("cover") or "",
+                  "video_url": url,
+                  "source": "api.btstu.cn"
+              },ensure_ascii=False,indent=2),
+              encoding="utf-8"
+          )
+          PY
+          URL="$(cat /tmp/video_url.txt)"
+          curl -fL --retry 3 --retry-all-errors             -A "Mozilla/5.0"             -H "Referer: https://www.douyin.com/"             "$URL" -o output/video.mp4
+          test -s output/video.mp4
+          ffprobe -v error             -show_entries format=duration,size             -show_entries stream=codec_name,codec_type,width,height             -of json output/video.mp4 > output/media_info.json
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: douyin-publicapi-${{ github.run_id }}
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
