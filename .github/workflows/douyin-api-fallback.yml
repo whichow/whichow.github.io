@@ -1,0 +1,91 @@
+name: Douyin API Fallback
+
+on:
+  push:
+    paths:
+      - ".requests/douyin-api-*"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Query Douyin detail APIs
+        shell: bash
+        env:
+          AWEME_ID: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          rm -rf output
+          mkdir -p output
+          UA="Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/140.0.0.0 Mobile Safari/537.36"
+          curl -L --max-time 30 -A "$UA" -H "Referer: https://www.douyin.com/"             "https://www.iesdouyin.com/web/api/v2/aweme/iteminfo/?item_ids=$AWEME_ID"             -o output/iteminfo_v2.json || true
+          curl -L --max-time 30 -A "$UA" -H "Referer: https://www.douyin.com/"             "https://www.iesdouyin.com/aweme/v1/web/aweme/detail/?aweme_id=$AWEME_ID&aid=6383"             -o output/detail_v1.json || true
+          wc -c output/*.json || true
+          head -c 1000 output/iteminfo_v2.json || true
+          echo
+          head -c 1000 output/detail_v1.json || true
+
+      - name: Parse and download
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, sys
+          candidates=[]
+          for name in ["output/iteminfo_v2.json","output/detail_v1.json"]:
+              p=pathlib.Path(name)
+              if not p.exists() or p.stat().st_size<2:
+                  continue
+              try:
+                  obj=json.loads(p.read_text(encoding="utf-8"))
+              except Exception:
+                  continue
+              items=[]
+              if isinstance(obj,dict):
+                  if isinstance(obj.get("item_list"),list): items += obj["item_list"]
+                  if isinstance(obj.get("aweme_list"),list): items += obj["aweme_list"]
+                  d=obj.get("aweme_detail")
+                  if isinstance(d,dict): items.append(d)
+              for it in items:
+                  v=(it or {}).get("video") or {}
+                  for key in ["play_addr","play_addr_h264","play_addr_265","download_addr"]:
+                      a=v.get(key) or {}
+                      for u in a.get("url_list") or []:
+                          if isinstance(u,str) and u.startswith("http"):
+                              candidates.append((key,u,it))
+          if not candidates:
+              raise SystemExit("No video URL candidates found")
+          key,url,it=candidates[0]
+          pathlib.Path("/tmp/video_url.txt").write_text(url,encoding="utf-8")
+          out={
+              "awemeId": str(it.get("aweme_id") or ""),
+              "desc": it.get("desc") or "",
+              "author": {"name": ((it.get("author") or {}).get("nickname") or "")},
+              "duration": ((it.get("video") or {}).get("duration")),
+              "source": "douyin-api",
+              "selected_key": key,
+              "video_url": url
+          }
+          pathlib.Path("output/result.json").write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding="utf-8")
+          print(json.dumps(out,ensure_ascii=False,indent=2))
+          PY
+          URL="$(cat /tmp/video_url.txt)"
+          curl -fL --retry 3 --retry-all-errors -A "Mozilla/5.0" -H "Referer: https://www.douyin.com/" "$URL" -o output/video.mp4
+          test -s output/video.mp4
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,codec_type,width,height -of json output/video.mp4 > output/media_info.json
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: douyin-api-${{ github.run_id }}
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
