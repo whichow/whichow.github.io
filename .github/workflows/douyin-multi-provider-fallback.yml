@@ -1,0 +1,135 @@
+name: Douyin Multi Provider Fallback
+
+on:
+  push:
+    paths:
+      - ".requests/douyin-multiapi-*"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Query public parsers
+        shell: bash
+        env:
+          RAW_INPUT: ${{ github.event.head_commit.message }}
+        run: |
+          set -u
+          rm -rf output
+          mkdir -p output
+
+          curl -sSGL --max-time 35             --data-urlencode "url=$RAW_INPUT"             "https://api.mmp.cc/api/Jiexi"             -o output/mmp.json || true
+
+          curl -sSGL --max-time 35             --data-urlencode "url=$RAW_INPUT"             "https://api.cxzja.cn/api/douyin"             -o output/cxzja.json || true
+
+          curl -sSGL --max-time 35             --data-urlencode "url=$RAW_INPUT"             --data-urlencode "type=json"             "https://capi.icu/api/douyin/dspjx.php"             -o output/capi.json || true
+
+          python3 - <<'PY' > /tmp/4dj_payload.json
+          import json, os
+          print(json.dumps({"url":os.environ["RAW_INPUT"]},ensure_ascii=False))
+          PY
+          curl -sS --max-time 35             -H "Content-Type: application/json"             --data-binary @/tmp/4dj_payload.json             "https://4dj.net/api/v1/video/parse.php"             -o output/4dj.json || true
+
+          for f in output/*.json; do
+            echo "===== $f ====="
+            wc -c "$f" || true
+            head -c 1500 "$f" || true
+            echo
+          done
+
+      - name: Pick video URL and download
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, re
+
+          files=[
+              ("mmp", pathlib.Path("output/mmp.json")),
+              ("cxzja", pathlib.Path("output/cxzja.json")),
+              ("capi", pathlib.Path("output/capi.json")),
+              ("4dj", pathlib.Path("output/4dj.json")),
+          ]
+
+          preferred_keys=[
+              "video_url_HQ","video_url","videourl","video","play_url",
+              "download_url","nwm_url"
+          ]
+
+          def walk(obj, path=""):
+              if isinstance(obj,dict):
+                  for k,v in obj.items():
+                      p=f"{path}.{k}" if path else k
+                      yield p,k,v
+                      yield from walk(v,p)
+              elif isinstance(obj,list):
+                  for i,v in enumerate(obj):
+                      yield from walk(v,f"{path}[{i}]")
+
+          candidates=[]
+          raw_objs={}
+          for provider,p in files:
+              if not p.exists() or p.stat().st_size<2:
+                  continue
+              try:
+                  obj=json.loads(p.read_text(encoding="utf-8",errors="ignore"))
+              except Exception:
+                  continue
+              raw_objs[provider]=obj
+              found=[]
+              for path,key,val in walk(obj):
+                  if isinstance(val,str) and val.startswith("http"):
+                      kl=key.lower()
+                      score=0
+                      if kl in [x.lower() for x in preferred_keys]:
+                          score += 100
+                      if any(x in kl for x in ["video","play","download"]):
+                          score += 30
+                      if any(x in val for x in [".mp4","douyinvod","aweme.snssdk","amemv","ixigua","bytecdn","douyin"]):
+                          score += 20
+                      if "cover" in kl or "avatar" in kl or "music" in kl or "img" in kl or "image" in kl:
+                          score -= 100
+                      found.append((score,path,val))
+              found.sort(reverse=True,key=lambda x:x[0])
+              for score,path,val in found:
+                  if score>0:
+                      candidates.append((provider,score,path,val))
+
+          if not candidates:
+              raise SystemExit("No video URL candidate from any provider")
+
+          provider,score,path,url=sorted(candidates,key=lambda x:x[1],reverse=True)[0]
+          pathlib.Path("/tmp/video_url.txt").write_text(url,encoding="utf-8")
+          result={
+              "provider":provider,
+              "score":score,
+              "path":path,
+              "video_url":url,
+              "raw":raw_objs.get(provider)
+          }
+          pathlib.Path("output/result.json").write_text(
+              json.dumps(result,ensure_ascii=False,indent=2),encoding="utf-8"
+          )
+          print(json.dumps({"provider":provider,"score":score,"path":path,"video_url":url},ensure_ascii=False,indent=2))
+          PY
+
+          URL="$(cat /tmp/video_url.txt)"
+          curl -fL --retry 3 --retry-all-errors --max-time 120             -A "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/140.0.0.0 Mobile Safari/537.36"             -H "Referer: https://www.douyin.com/"             "$URL" -o output/video.mp4
+          test -s output/video.mp4
+          ffprobe -v error             -show_entries format=duration,size             -show_entries stream=codec_name,codec_type,width,height             -of json output/video.mp4 > output/media_info.json
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: douyin-multiapi-${{ github.run_id }}
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
