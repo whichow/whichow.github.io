@@ -1,0 +1,213 @@
+name: Douyin Session Cookie Parser
+
+on:
+  push:
+    paths:
+      - ".requests/douyin-session-*"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          python3 -m pip install --upgrade requests
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y ffmpeg >/dev/null
+
+      - name: Session-cookie parse and download
+        shell: bash
+        env:
+          AWEME_ID: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          rm -rf output
+          mkdir -p output
+          python3 - <<'PY'
+          import os, re, json, time, base64, hashlib, pathlib, requests
+          from urllib.parse import urljoin
+
+          vid=os.environ["AWEME_ID"].strip()
+          share=f"https://www.iesdouyin.com/share/video/{vid}/"
+          ua="Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+          headers={
+              "User-Agent": ua,
+              "Accept-Language":"zh-CN,zh;q=0.9,en;q=0.8",
+              "Referer":"https://www.douyin.com/",
+          }
+          s=requests.Session()
+          s.headers.update(headers)
+
+          def b64decodeurl(v):
+              v=v.replace("-","+").replace("_","/")
+              v += "="*((4-len(v)%4)%4)
+              return base64.b64decode(v)
+
+          def solve_waf(html, url):
+              m=re.search(r'wci="([^"]+)"\s*,\s*cs="([^"]+)"', html)
+              if not m:
+                  return html
+              cookie_name, blob=m.group(1),m.group(2)
+              try:
+                  challenge=json.loads(b64decodeurl(blob).decode("utf-8"))
+                  prefix=b64decodeurl(challenge["v"]["a"])
+                  expected=b64decodeurl(challenge["v"]["c"]).hex()
+                  answer=None
+                  for candidate in range(1_000_001):
+                      digest=hashlib.sha256(prefix+str(candidate).encode()).hexdigest()
+                      if digest==expected:
+                          answer=str(candidate)
+                          break
+                  if answer is None:
+                      print("WAF challenge answer not found")
+                      return html
+                  challenge["d"]=base64.b64encode(answer.encode()).decode()
+                  cookie_value=base64.b64encode(json.dumps(challenge,separators=(",",":")).encode()).decode()
+                  s.cookies.set(cookie_name,cookie_value,domain=".iesdouyin.com")
+                  r=s.get(url,timeout=30,allow_redirects=True)
+                  print("WAF retry",r.status_code,len(r.text),"cookies",s.cookies.get_dict())
+                  return r.text if r.ok else html
+              except Exception as e:
+                  print("WAF solve failed",repr(e))
+                  return html
+
+          def extract_router(html):
+              m=re.search(r'window\._ROUTER_DATA\s*=\s*',html)
+              if not m:
+                  return None
+              i=m.end()
+              while i<len(html) and html[i].isspace(): i+=1
+              if i>=len(html) or html[i]!="{":
+                  return None
+              depth=0; in_str=False; esc=False
+              for j in range(i,len(html)):
+                  ch=html[j]
+                  if in_str:
+                      if esc: esc=False
+                      elif ch=="\\": esc=True
+                      elif ch=='"': in_str=False
+                      continue
+                  if ch=='"': in_str=True
+                  elif ch=="{": depth+=1
+                  elif ch=="}":
+                      depth-=1
+                      if depth==0:
+                          try: return json.loads(html[i:j+1])
+                          except Exception as e:
+                              print("router json parse error",repr(e))
+                              return None
+              return None
+
+          def find_item(router):
+              if not isinstance(router,dict):
+                  return None
+              loader=router.get("loaderData") or {}
+              if isinstance(loader,dict):
+                  for k,node in loader.items():
+                      if not isinstance(node,dict): continue
+                      vir=node.get("videoInfoRes") or {}
+                      items=vir.get("item_list") or []
+                      if items and isinstance(items[0],dict):
+                          print("item found at loaderData key",k)
+                          return items[0]
+              def rec(x,depth=0):
+                  if depth>12: return None
+                  if isinstance(x,dict):
+                      vir=x.get("videoInfoRes")
+                      if isinstance(vir,dict):
+                          items=vir.get("item_list") or []
+                          if items and isinstance(items[0],dict): return items[0]
+                      for v in x.values():
+                          y=rec(v,depth+1)
+                          if y:return y
+                  elif isinstance(x,list):
+                      for v in x:
+                          y=rec(v,depth+1)
+                          if y:return y
+                  return None
+              return rec(router)
+
+          item=None
+          last_fp=None
+          for attempt in range(1,8):
+              r=s.get(share,timeout=30,allow_redirects=True)
+              html=r.text
+              pathlib.Path(f"output/page_{attempt}.html").write_text(html,encoding="utf-8")
+              print("attempt",attempt,"status",r.status_code,"bytes",len(html),"cookies",s.cookies.get_dict())
+              if "Please wait..." in html and "wci=" in html and "cs=" in html:
+                  html=solve_waf(html,share)
+              router=extract_router(html)
+              if router:
+                  pathlib.Path(f"output/router_{attempt}.json").write_text(json.dumps(router,ensure_ascii=False),encoding="utf-8")
+                  item=find_item(router)
+                  if item:
+                      break
+              fp=tuple(sorted(s.cookies.get_dict().items()))
+              if attempt>=2 and fp==last_fp:
+                  print("cookie fingerprint unchanged")
+              last_fp=fp
+              time.sleep(.35*attempt)
+
+          if not item:
+              raise SystemExit("No item after cookie-session retries")
+
+          video=item.get("video") or {}
+          candidates=[]
+          for key in ("play_addr","play_addr_h264","play_addr_265","download_addr"):
+              a=video.get(key) or {}
+              for u in a.get("url_list") or []:
+                  if isinstance(u,str) and u.startswith("http"):
+                      candidates.append((key,u.replace("playwm","play")))
+          if not candidates:
+              for rate in video.get("bit_rate") or []:
+                  a=(rate.get("play_addr") or {})
+                  for u in a.get("url_list") or []:
+                      if isinstance(u,str) and u.startswith("http"):
+                          candidates.append(("bit_rate",u.replace("playwm","play")))
+          if not candidates:
+              raise SystemExit("No media URL in item")
+
+          # Prefer direct CDN over /aweme/v1/play/ redirect endpoint.
+          candidates.sort(key=lambda x: ("/aweme/v1/play/" in x[1], x[0]=="download_addr"))
+          key,url=candidates[0]
+          result={
+              "aweme_id": item.get("aweme_id") or vid,
+              "desc": item.get("desc") or "",
+              "author": (item.get("author") or {}).get("nickname") or "",
+              "duration_ms": video.get("duration"),
+              "width": video.get("width"),
+              "height": video.get("height"),
+              "selected_key":key,
+              "video_url":url,
+              "cookies":list(s.cookies.get_dict().keys()),
+          }
+          pathlib.Path("output/result.json").write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding="utf-8")
+          pathlib.Path("output/aweme_detail.json").write_text(json.dumps(item,ensure_ascii=False,indent=2),encoding="utf-8")
+          print(json.dumps({k:v for k,v in result.items() if k!="video_url"},ensure_ascii=False,indent=2))
+
+          rr=s.get(url,headers={"User-Agent":ua,"Referer":"https://www.douyin.com/"},timeout=120,allow_redirects=True,stream=True)
+          rr.raise_for_status()
+          with open("output/video.mp4","wb") as f:
+              for chunk in rr.iter_content(1024*1024):
+                  if chunk: f.write(chunk)
+          size=pathlib.Path("output/video.mp4").stat().st_size
+          print("downloaded",size)
+          if size<10000: raise SystemExit("downloaded media too small")
+          PY
+          ffprobe -v error             -show_entries format=duration,size             -show_entries stream=codec_name,codec_type,width,height             -of json output/video.mp4 > output/media_info.json
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: douyin-session-${{ github.run_id }}
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
