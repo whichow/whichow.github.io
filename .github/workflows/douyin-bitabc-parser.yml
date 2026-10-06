@@ -1,0 +1,61 @@
+name: Douyin Bitabc Parser
+
+on:
+  push:
+    paths:
+      - ".requests/douyin-bitabc-*"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare
+        run: |
+          git clone --depth 1 https://github.com/bitabc/douyin-parser.git /tmp/bitabc
+          python3 -m pip install --upgrade httpx
+
+      - name: Parse and download
+        shell: bash
+        env:
+          RAW_INPUT: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          rm -rf output
+          mkdir -p output
+          python3 - <<'PY'
+          import os,sys,json,asyncio,pathlib,httpx
+          sys.path.insert(0,"/tmp/bitabc")
+          from parsers import parse_douyin_url
+          raw=os.environ["RAW_INPUT"]
+          data=asyncio.run(parse_douyin_url(raw))
+          pathlib.Path("output/result.json").write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding="utf-8")
+          video=(data.get("video") or {}).get("url")
+          if not video:
+              raise SystemExit("No video URL")
+          async def dl():
+              headers={"User-Agent":"Mozilla/5.0","Referer":"https://www.douyin.com/"}
+              async with httpx.AsyncClient(follow_redirects=True,timeout=60,headers=headers) as c:
+                  r=await c.get(video)
+                  r.raise_for_status()
+                  pathlib.Path("output/video.mp4").write_bytes(r.content)
+          asyncio.run(dl())
+          if pathlib.Path("output/video.mp4").stat().st_size < 10000:
+              raise SystemExit("video too small")
+          PY
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,codec_type,width,height -of json output/video.mp4 > output/media_info.json
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: douyin-bitabc-${{ github.run_id }}
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
