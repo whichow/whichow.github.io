@@ -1,0 +1,72 @@
+name: Douyin Signed Parser
+
+on:
+  push:
+    paths:
+      - ".requests/douyin-signed-*"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare signed parser
+        run: |
+          git clone --depth 1 https://github.com/DLWangSan/douyin_parse.git /tmp/dyparse
+          python3 -m pip install --upgrade requests gmssl
+
+      - name: Parse and download
+        shell: bash
+        env:
+          RAW_INPUT: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          rm -rf output
+          mkdir -p output
+          python3 - <<'PY'
+          import os,sys,json,requests,pathlib
+          sys.path.insert(0,"/tmp/dyparse")
+          from douyin_video_parser import DouyinVideoParser
+
+          raw=os.environ["RAW_INPUT"].strip()
+          p=DouyinVideoParser()
+          result=p.parse_video(raw)
+          if not result:
+              raise SystemExit("signed parser returned no result")
+          pathlib.Path("output/result.json").write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding="utf-8")
+          qualities=result.get("qualities") or []
+          url=(qualities[0].get("url") if qualities else None) or result.get("nwm_url")
+          if not url:
+              raise SystemExit("no playable URL found")
+          headers={"User-Agent":p.user_agent,"Referer":"https://www.douyin.com/"}
+          r=requests.get(url,headers=headers,stream=True,timeout=60,allow_redirects=True)
+          r.raise_for_status()
+          with open("output/video.mp4","wb") as f:
+              for chunk in r.iter_content(1024*1024):
+                  if chunk: f.write(chunk)
+          if pathlib.Path("output/video.mp4").stat().st_size < 10000:
+              raise SystemExit("downloaded file too small")
+          print(json.dumps({
+            "aweme_id":result.get("aweme_id"),
+            "desc":result.get("desc"),
+            "author":result.get("author_nickname"),
+            "content_type":result.get("content_type"),
+            "selected": qualities[0] if qualities else {"url":url}
+          },ensure_ascii=False,indent=2))
+          PY
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,codec_type,width,height -of json output/video.mp4 > output/media_info.json
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: douyin-signed-${{ github.run_id }}
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
