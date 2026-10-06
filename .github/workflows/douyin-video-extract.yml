@@ -1,6 +1,9 @@
 name: Douyin Video Extractor
 
 on:
+  push:
+    paths:
+      - ".requests/douyin-video-*"
   workflow_dispatch:
     inputs:
       url:
@@ -71,7 +74,7 @@ jobs:
       - name: Extract Douyin media
         shell: bash
         env:
-          RAW_INPUT: ${{ inputs.url }}
+          RAW_INPUT: ${{ github.event_name == 'push' && github.event.head_commit.message || inputs.url }}
         run: |
           set -euo pipefail
           rm -rf output
