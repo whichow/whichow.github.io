@@ -1,0 +1,82 @@
+name: Douyin Modern Parser
+
+on:
+  push:
+    paths:
+      - ".requests/douyin-modern-*"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare parser
+        run: |
+          git clone --depth 1 https://github.com/tongtong050/douyin-video-fetch.git /tmp/dvf
+          python3 -m pip install --upgrade httpx
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y ffmpeg >/dev/null
+
+      - name: Extract with modern parser
+        shell: bash
+        env:
+          RAW_INPUT: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          rm -rf output
+          mkdir -p output
+          python3 - <<'PY'
+          import os, sys, json, asyncio, pathlib, shutil
+          sys.path.insert(0, "/tmp/dvf")
+          import douyin_fetch as d
+
+          raw=os.environ["RAW_INPUT"]
+          resolved=d.resolve_input(raw)
+          cfg=d.load_config()
+          aweme=d.fetch_aweme(
+              resolved["video_id"],
+              resolved.get("hint_type") or "video",
+              resolved.get("share_url") or raw,
+              cfg
+          )
+          info=d.normalize_aweme(aweme, resolved["video_id"])
+          videos=[m for m in info.get("media_items",[]) if m.get("kind")=="video"]
+          if not videos:
+              raise SystemExit("No video media item found")
+          item=videos[0]
+          ok=asyncio.run(d.download_file(item["url"], "output/video.mp4", cfg, label="video.mp4"))
+          if not ok:
+              raise SystemExit("video download failed")
+          pathlib.Path("output/result.json").write_text(
+              json.dumps({
+                  "awemeId": info.get("aweme_id"),
+                  "desc": info.get("desc"),
+                  "author": {"name": info.get("author")},
+                  "duration": info.get("duration"),
+                  "work_type": info.get("work_type"),
+                  "video_url": item.get("url"),
+                  "source": "tongtong050/douyin-video-fetch"
+              },ensure_ascii=False,indent=2),
+              encoding="utf-8"
+          )
+          pathlib.Path("output/aweme_detail.json").write_text(
+              json.dumps(aweme,ensure_ascii=False,indent=2), encoding="utf-8"
+          )
+          PY
+          test -s output/video.mp4
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,codec_type,width,height -of json output/video.mp4 > output/media_info.json
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: douyin-modern-${{ github.run_id }}
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
