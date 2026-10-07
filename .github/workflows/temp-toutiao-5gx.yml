@@ -2,7 +2,7 @@ name: Temp Toutiao Extract 5GX
 
 on:
   workflow_run:
-    workflows: ["pages build and deployment"]
+    workflows: ["Toutiao Video Request Bridge"]
     types: [completed]
 
 permissions:
