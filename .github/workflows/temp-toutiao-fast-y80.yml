@@ -1,0 +1,34 @@
+name: Temp Toutiao Fast Extract Y80
+on:
+  push:
+    paths:
+      - ".requests/toutiao-fast-y80-*"
+permissions:
+  contents: read
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install minimal deps
+        run: pip install requests curl_cffi
+      - name: Extract media
+        shell: bash
+        run: |
+          rm -rf output
+          mkdir -p output
+          python tools/toutiao_video_extract.py "https://m.toutiao.com/is/Y80j7cPsS-4/" --out output || true
+          test -s output/result.json
+          find output -maxdepth 2 -type f -printf '%p %s bytes\n'
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toutiao-fast-y80-${{ github.run_id }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 7
