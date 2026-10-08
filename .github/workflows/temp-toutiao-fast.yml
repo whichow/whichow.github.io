@@ -1,0 +1,37 @@
+name: Temp Toutiao Fast Extract
+on:
+  push:
+    paths:
+      - ".requests/toutiao-fast-*"
+permissions:
+  contents: read
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install minimal deps
+        run: pip install requests curl_cffi
+      - name: Extract
+        shell: bash
+        run: |
+          rm -rf output
+          mkdir -p output
+          python tools/toutiao_video_extract.py "https://m.toutiao.com/is/tfhz91OTEHM/" --out output || true
+          if [ ! -s output/video.mp4 ]; then
+            rm -rf output
+            python tools/toutiao_image_extract.py "https://m.toutiao.com/is/tfhz91OTEHM/" --out output
+          fi
+          find output -maxdepth 2 -type f -printf '%p %s bytes\n'
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toutiao-fast-${{ github.run_id }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 7
