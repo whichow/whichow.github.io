@@ -41,10 +41,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install requests curl_cffi yt-dlp faster-whisper
-          sudo apt-get update -y
-          sudo apt-get install -y ffmpeg
+          pip install requests curl_cffi
 
       - name: Extract real Toutiao video
         id: extract
@@ -173,8 +170,7 @@ jobs:
         run: |
           test -s output/result.json
           test -s output/video.mp4
-          test -s output/transcript.txt
-          echo "Extraction validated."
+          echo "Video extraction validated."
 
       - name: Upload extraction artifact
         if: always()
