@@ -414,6 +414,11 @@ def main() -> int:
     report["canonical_video_url"] = page_url
 
     pages: list[tuple[str, str]] = []
+    # The resolved short link may already be a working m.toutiao.com/video page even when
+    # www.toutiao.com/video/{id}/ returns 404. Reuse that HTML as a first-class source.
+    if short_html:
+        pages.append(("shortlink_response.html", short_html))
+
     for mobile in (False, True):
         try:
             r = get(session, page_url, referer="https://www.toutiao.com/", mobile=mobile)
