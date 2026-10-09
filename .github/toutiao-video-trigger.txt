@@ -1,2 +1,2 @@
 https://m.toutiao.com/is/SJ7mWXyqd6Y/
-retry=douyin-ssr-fallback
+retry=douyin-mobile-feed
