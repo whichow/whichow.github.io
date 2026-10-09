@@ -1,10 +1,6 @@
 name: Toutiao Video Extractor
 
 on:
-  push:
-    branches: [toutiao-video-extract-7688644560120971315]
-    paths:
-      - '.github/toutiao-video-trigger.txt'
   workflow_dispatch:
     inputs:
       url:
@@ -23,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  TOUTIAO_URL: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.url || inputs.url || 'https://m.toutiao.com/is/_2bLRjx_w5E/' }}
+  TOUTIAO_URL: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.url || inputs.url || 'https://m.toutiao.com/is/pso4hdMSQQI/' }}
 
 jobs:
   extract:
@@ -41,7 +37,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests curl_cffi
+          python -m pip install --upgrade pip
+          pip install requests curl_cffi yt-dlp faster-whisper
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
 
       - name: Extract real Toutiao video
         id: extract
@@ -170,7 +169,8 @@ jobs:
         run: |
           test -s output/result.json
           test -s output/video.mp4
-          echo "Video extraction validated."
+          test -s output/transcript.txt
+          echo "Extraction validated."
 
       - name: Upload extraction artifact
         if: always()
