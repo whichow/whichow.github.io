@@ -1,6 +1,9 @@
 name: Xiaohongshu Extractor
 
 on:
+  push:
+    paths:
+      - ".requests/xiaohongshu-*"
   workflow_dispatch:
     inputs:
       url:
@@ -39,7 +42,7 @@ jobs:
       - name: Extract Xiaohongshu media
         shell: bash
         env:
-          RAW_INPUT: ${{ inputs.url }}
+          RAW_INPUT: ${{ github.event_name == 'push' && github.event.head_commit.message || inputs.url }}
           PYTHONPATH: /tmp/shizhen/src
         run: |
           set -euo pipefail
