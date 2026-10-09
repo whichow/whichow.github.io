@@ -1,33 +1,33 @@
 {
-  "input_url": "https://m.toutiao.com/is/SJ7mWXyqd6Y/",
+  "input_url": "https://m.toutiao.com/is/_2bLRjx_w5E/",
   "errors": [],
   "source_project": "NanmiCoder/NewsCrawler",
-  "resolved_url": "https://m.toutiao.com/video/7661736431131965435/?app=news_article&entrance_packer_category=aweme_sdk_share_reflux&from_aweme=1&is_ao_card=1&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=78280e6f-e8bc-45b4-9b08-431cc27efa37&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1791559125&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link",
+  "resolved_url": "https://m.toutiao.com/video/7556987200663981322/?app=news_article&entrance_packer_category=aweme_sdk_share_reflux&from_aweme=1&is_ao_card=1&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=d39ec87f-cfdc-4029-8ea9-9121c7e0bb08&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1791559268&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link",
   "redirect_chain": [
     {
       "status": 302,
-      "url": "https://m.toutiao.com/is/SJ7mWXyqd6Y/",
-      "location": "https://m.toutiao.com/video/7661736431131965435/?app=news_article&entrance_packer_category=aweme_sdk_share_reflux&from_aweme=1&is_ao_card=1&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=78280e6f-e8bc-45b4-9b08-431cc27efa37&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1791559125&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link"
+      "url": "https://m.toutiao.com/is/_2bLRjx_w5E/",
+      "location": "https://m.toutiao.com/video/7556987200663981322/?app=news_article&entrance_packer_category=aweme_sdk_share_reflux&from_aweme=1&is_ao_card=1&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=d39ec87f-cfdc-4029-8ea9-9121c7e0bb08&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1791559268&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link"
     },
     {
       "status": 200,
-      "url": "https://m.toutiao.com/video/7661736431131965435/?app=news_article&entrance_packer_category=aweme_sdk_share_reflux&from_aweme=1&is_ao_card=1&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=78280e6f-e8bc-45b4-9b08-431cc27efa37&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1791559125&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link",
+      "url": "https://m.toutiao.com/video/7556987200663981322/?app=news_article&entrance_packer_category=aweme_sdk_share_reflux&from_aweme=1&is_ao_card=1&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=d39ec87f-cfdc-4029-8ea9-9121c7e0bb08&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1791559268&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link",
       "location": null
     }
   ],
-  "article_id": "7661736431131965435",
-  "canonical_url": "https://www.toutiao.com/article/7661736431131965435/",
+  "article_id": "7556987200663981322",
+  "canonical_url": "https://www.toutiao.com/article/7556987200663981322/",
   "fetches": [
     {
       "name": "article_desktop.html",
       "status": 200,
-      "final_url": "https://www.toutiao.com/article/7661736431131965435/",
+      "final_url": "https://www.toutiao.com/article/7556987200663981322/",
       "bytes": 4911
     },
     {
       "name": "article_mobile.html",
       "status": 404,
-      "final_url": "https://m.toutiao.com/article/7661736431131965435/?upstream_biz=toutiao_pc",
+      "final_url": "https://m.toutiao.com/article/7556987200663981322/?upstream_biz=toutiao_pc",
       "bytes": 29000
     }
   ],
@@ -43,9 +43,9 @@
   },
   "detail_api_fetches": [
     {
-      "url": "https://m.toutiao.com/i7661736431131965435/info/",
+      "url": "https://m.toutiao.com/i7556987200663981322/info/",
       "status": 200,
-      "final_url": "https://m.toutiao.com/i7661736431131965435/info/",
+      "final_url": "https://m.toutiao.com/i7556987200663981322/info/",
       "bytes": 70,
       "image_count": 0,
       "top_keys": [
@@ -55,9 +55,9 @@
       ]
     },
     {
-      "url": "https://m.toutiao.com/pwa/api/wxapp/info/7661736431131965435/",
+      "url": "https://m.toutiao.com/pwa/api/wxapp/info/7556987200663981322/",
       "status": 200,
-      "final_url": "https://m.toutiao.com/pwa/api/wxapp/info/7661736431131965435/",
+      "final_url": "https://m.toutiao.com/pwa/api/wxapp/info/7556987200663981322/",
       "bytes": 27,
       "image_count": 0,
       "top_keys": [
