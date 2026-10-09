@@ -347,6 +347,147 @@ def collect(data: Any, page: str) -> dict[str, Any]:
     }
 
 
+
+def parse_router_data(page: str) -> Any | None:
+    """Extract Douyin mobile share page window._ROUTER_DATA JSON."""
+    m = re.search(r"window\._ROUTER_DATA\s*=\s*", page)
+    if not m:
+        return None
+    tail = page[m.end():]
+    end = tail.find("</script>")
+    if end >= 0:
+        tail = tail[:end]
+    raw = tail.strip().rstrip(";").strip()
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def find_aweme_item(obj: Any, aweme_id: str) -> dict[str, Any] | None:
+    if isinstance(obj, dict):
+        if str(obj.get("aweme_id") or "") == str(aweme_id) and isinstance(obj.get("video"), dict):
+            return obj
+        for v in obj.values():
+            found = find_aweme_item(v, aweme_id)
+            if found is not None:
+                return found
+    elif isinstance(obj, list):
+        for v in obj:
+            found = find_aweme_item(v, aweme_id)
+            if found is not None:
+                return found
+    return None
+
+
+def extract_douyin_media(item: dict[str, Any]) -> list[dict[str, str]]:
+    video = item.get("video") if isinstance(item, dict) else None
+    if not isinstance(video, dict):
+        return []
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add_urls(node: Any, path: str, score_hint: int = 0) -> None:
+        if not isinstance(node, dict):
+            return
+        urls = node.get("url_list")
+        if not isinstance(urls, list):
+            return
+        for idx, raw in enumerate(urls):
+            if not isinstance(raw, str) or not raw.startswith(("http://", "https://")):
+                continue
+            variants = [raw]
+            if "/playwm/" in raw:
+                variants.insert(0, raw.replace("/playwm/", "/play/"))
+            for v in variants:
+                if v in seen:
+                    continue
+                seen.add(v)
+                out.append({"path": f"douyin.{path}.{idx}.score{score_hint}", "url": v})
+
+    bit_rates = video.get("bit_rate")
+    if isinstance(bit_rates, list):
+        for i, br in enumerate(bit_rates):
+            if not isinstance(br, dict):
+                continue
+            is_h265 = br.get("is_h265")
+            codec = str(br.get("codec_type") or br.get("gear_name") or "")
+            bitrate = int(br.get("bit_rate") or 0)
+            # Prefer H.264/browser-friendly streams, then higher bitrate.
+            bonus = bitrate + (10_000_000 if is_h265 in (0, False, None) or "h264" in codec.lower() else 0)
+            add_urls(br.get("play_addr"), f"bit_rate.{i}.play_addr", bonus)
+
+    for key in ("play_addr", "play_addr_h264", "download_addr"):
+        add_urls(video.get(key), key, 0)
+
+    def score(entry: dict[str, str]) -> int:
+        p = entry["path"]
+        m = re.search(r"\.score(\d+)$", p)
+        s = int(m.group(1)) if m else 0
+        if "/play/" in entry["url"]:
+            s += 1000
+        return s
+
+    out.sort(key=score, reverse=True)
+    return out
+
+
+def fetch_douyin_share_fallback(session, aweme_id: str, out: Path) -> dict[str, Any]:
+    report: dict[str, Any] = {"aweme_id": aweme_id, "media_candidates": []}
+    share_url = f"https://www.iesdouyin.com/share/video/{aweme_id}/"
+    try:
+        r = get(session, share_url, referer="https://www.douyin.com/", mobile=True)
+        report["share_url"] = share_url
+        report["share_status"] = r.status_code
+        report["share_final_url"] = str(r.url)
+        (out / "douyin_share.html").write_text(r.text, encoding="utf-8", errors="ignore")
+        data = parse_router_data(r.text)
+        if data is not None:
+            (out / "douyin_share.router_data.json").write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            item = find_aweme_item(data, aweme_id)
+            if item is not None:
+                report["source"] = "iesdouyin_share_router_data"
+                report["title"] = str(item.get("desc") or "").strip()
+                author = item.get("author")
+                if isinstance(author, dict):
+                    report["author"] = str(author.get("nickname") or "").strip()
+                report["media_candidates"] = extract_douyin_media(item)
+                return report
+    except Exception as e:
+        report.setdefault("errors", []).append(f"share page failed: {type(e).__name__}: {e}")
+
+    # Older public JSON endpoint still works intermittently; keep it as a secondary fallback.
+    api = f"https://www.iesdouyin.com/web/api/v2/aweme/iteminfo/?item_ids={aweme_id}"
+    try:
+        headers = {
+            "User-Agent": UA_MOBILE,
+            "Referer": "https://www.douyin.com/",
+            "Accept": "application/json,text/plain,*/*",
+        }
+        kwargs = dict(headers=headers, timeout=40, allow_redirects=True)
+        if crequests is not None and session.__class__.__module__.startswith("curl_cffi"):
+            kwargs["impersonate"] = "chrome"
+        r = session.get(api, **kwargs)
+        report["iteminfo_status"] = r.status_code
+        data = r.json()
+        (out / "douyin_iteminfo.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        item = find_aweme_item(data, aweme_id)
+        if item is not None:
+            report["source"] = "iesdouyin_iteminfo"
+            report["title"] = str(item.get("desc") or "").strip()
+            author = item.get("author")
+            if isinstance(author, dict):
+                report["author"] = str(author.get("nickname") or "").strip()
+            report["media_candidates"] = extract_douyin_media(item)
+    except Exception as e:
+        report.setdefault("errors", []).append(f"iteminfo failed: {type(e).__name__}: {e}")
+    return report
+
+
 def download_media(session, url: str, dest: Path) -> dict[str, Any]:
     headers = {
         "User-Agent": UA_DESKTOP,
@@ -470,6 +611,21 @@ def main() -> int:
         report["title"] = report["title_candidates"][0]["value"]
     if report["author_candidates"]:
         report["author"] = report["author_candidates"][0]["value"]
+
+    # Toutiao "from_aweme=1" reflux pages may expose no playable URL/token.
+    # Fall back to Douyin's mobile share SSR, which can carry the original aweme item.
+    if not report.get("media_candidates") and vid:
+        dy = fetch_douyin_share_fallback(session, vid, out)
+        report["douyin_fallback"] = {
+            k: v for k, v in dy.items() if k != "media_candidates"
+        }
+        dy_media = dy.get("media_candidates") or []
+        if dy_media:
+            report["media_candidates"] = dy_media
+            if dy.get("title"):
+                report["title"] = dy["title"]
+            if dy.get("author"):
+                report["author"] = dy["author"]
 
     video_path = out / "video.mp4"
     if report["media_candidates"]:
