@@ -434,6 +434,69 @@ def extract_douyin_media(item: dict[str, Any]) -> list[dict[str, str]]:
 
 def fetch_douyin_share_fallback(session, aweme_id: str, out: Path) -> dict[str, Any]:
     report: dict[str, Any] = {"aweme_id": aweme_id, "media_candidates": []}
+    # Primary path for normal Douyin videos: mobile Feed API.
+    # It avoids the PC Web Argus gate and does not require cookie/a_bogus.
+    mobile_feed_ua = (
+        "com.ss.android.ugc.aweme/290101 (Linux; U; Android 10; zh_CN; Pixel 4; "
+        "Build/QQ3A.200805.001; Cronet/TTNetVersion:5f9037be 2023-01-13 "
+        "QuicVersion:4668bb42 2022-11-21)"
+    )
+    feed_endpoints = [
+        "https://api5-normal-c-hl.amemv.com/aweme/v1/feed/",
+        "https://aweme.snssdk.com/aweme/v1/feed/",
+    ]
+    for endpoint in feed_endpoints:
+        try:
+            headers = {
+                "User-Agent": mobile_feed_ua,
+                "Accept": "application/json, text/plain, */*",
+            }
+            r = session.get(
+                endpoint,
+                params={"aweme_id": str(aweme_id), "aid": "1128"},
+                headers=headers,
+                timeout=12,
+                allow_redirects=True,
+            )
+            report.setdefault("mobile_feed", []).append({
+                "endpoint": endpoint,
+                "status": r.status_code,
+                "bytes": len(r.content),
+            })
+            if r.status_code != 200 or not r.text:
+                continue
+            data = r.json()
+            safe = "amemv" if "amemv.com" in endpoint else "snssdk"
+            (out / f"douyin_mobile_feed_{safe}.json").write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            aweme_list = data.get("aweme_list") if isinstance(data, dict) else None
+            if not isinstance(aweme_list, list):
+                continue
+            item = next(
+                (
+                    x for x in aweme_list
+                    if isinstance(x, dict)
+                    and str(x.get("aweme_id") or x.get("id") or "") == str(aweme_id)
+                ),
+                None,
+            )
+            if item is None:
+                continue
+            media = extract_douyin_media(item)
+            report["source"] = "douyin_mobile_feed"
+            report["title"] = str(item.get("desc") or "").strip()
+            author = item.get("author")
+            if isinstance(author, dict):
+                report["author"] = str(author.get("nickname") or "").strip()
+            report["media_candidates"] = media
+            if media:
+                return report
+        except Exception as e:
+            report.setdefault("errors", []).append(
+                f"mobile feed {endpoint} failed: {type(e).__name__}: {e}"
+            )
+
     share_url = f"https://www.iesdouyin.com/share/video/{aweme_id}/"
     try:
         r = get(session, share_url, referer="https://www.douyin.com/", mobile=True)
