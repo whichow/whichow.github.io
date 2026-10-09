@@ -71,6 +71,54 @@ jobs:
               -o "output/video.%(ext)s" \
               "$TOUTIAO_URL" || true
           fi
+
+          # Toutiao share links can resolve to Douyin. yt-dlp can identify these
+          # but Douyin may require fresh, non-login browser cookies. Warm a clean
+          # Chrome profile on Douyin, then retry with that cookie jar.
+          if [ ! -s output/video.mp4 ]; then
+            VID="$(python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("output/result.json")
+          if p.exists():
+              try:
+                  print(json.loads(p.read_text(encoding="utf-8")).get("video_id", ""))
+              except Exception:
+                  pass
+          PY
+            )"
+            CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+            if [ -n "$VID" ] && [ -n "$CHROME" ]; then
+              PROFILE="/tmp/douyin-chrome-profile"
+              rm -rf "$PROFILE"
+              mkdir -p "$PROFILE"
+              timeout 25s "$CHROME" \
+                --headless=new \
+                --no-sandbox \
+                --disable-gpu \
+                --disable-dev-shm-usage \
+                --user-data-dir="$PROFILE" \
+                --virtual-time-budget=7000 \
+                --dump-dom "https://www.douyin.com/" >/tmp/douyin-home.html 2>/tmp/douyin-chrome-home.log || true
+              timeout 25s "$CHROME" \
+                --headless=new \
+                --no-sandbox \
+                --disable-gpu \
+                --disable-dev-shm-usage \
+                --user-data-dir="$PROFILE" \
+                --virtual-time-budget=10000 \
+                --dump-dom "https://www.douyin.com/video/$VID" >/tmp/douyin-video.html 2>/tmp/douyin-chrome-video.log || true
+              yt-dlp \
+                --cookies-from-browser "chrome:$PROFILE" \
+                --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36" \
+                --referer "https://www.douyin.com/" \
+                --no-playlist \
+                --write-info-json \
+                --merge-output-format mp4 \
+                -o "output/video.%(ext)s" \
+                "https://www.douyin.com/video/$VID" || true
+            fi
+          fi
           ls -lah output || true
 
       - name: Extract audio
