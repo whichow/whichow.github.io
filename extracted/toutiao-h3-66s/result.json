@@ -1,72 +1,52 @@
 {
-  "input_url": "https://m.toutiao.com/is/hahExyaHwlY/",
+  "input_url": "https://m.toutiao.com/is/SJ7mWXyqd6Y/",
   "errors": [],
   "source_project": "NanmiCoder/NewsCrawler",
-  "resolved_url": "https://m.toutiao.com/video/7690206330174472202/?app=news_article&category_new=tt_video_immerse&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=8f513cc3-be97-11f1-b953-5c6aec3947aa&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1790969357&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link",
+  "resolved_url": "https://m.toutiao.com/video/7661736431131965435/?app=news_article&entrance_packer_category=aweme_sdk_share_reflux&from_aweme=1&is_ao_card=1&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=78280e6f-e8bc-45b4-9b08-431cc27efa37&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1791559125&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link",
   "redirect_chain": [
     {
       "status": 302,
-      "url": "https://m.toutiao.com/is/hahExyaHwlY/",
-      "location": "https://m.toutiao.com/video/7690206330174472202/?app=news_article&category_new=tt_video_immerse&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=8f513cc3-be97-11f1-b953-5c6aec3947aa&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1790969357&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link"
+      "url": "https://m.toutiao.com/is/SJ7mWXyqd6Y/",
+      "location": "https://m.toutiao.com/video/7661736431131965435/?app=news_article&entrance_packer_category=aweme_sdk_share_reflux&from_aweme=1&is_ao_card=1&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=78280e6f-e8bc-45b4-9b08-431cc27efa37&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1791559125&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link"
     },
     {
       "status": 200,
-      "url": "https://m.toutiao.com/video/7690206330174472202/?app=news_article&category_new=tt_video_immerse&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=8f513cc3-be97-11f1-b953-5c6aec3947aa&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1790969357&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link",
+      "url": "https://m.toutiao.com/video/7661736431131965435/?app=news_article&entrance_packer_category=aweme_sdk_share_reflux&from_aweme=1&is_ao_card=1&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=78280e6f-e8bc-45b4-9b08-431cc27efa37&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1791559125&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link",
       "location": null
     }
   ],
-  "article_id": "7690206330174472202",
-  "canonical_url": "https://www.toutiao.com/article/7690206330174472202/",
+  "article_id": "7661736431131965435",
+  "canonical_url": "https://www.toutiao.com/article/7661736431131965435/",
   "fetches": [
     {
       "name": "article_desktop.html",
       "status": 200,
-      "final_url": "https://www.toutiao.com/article/7690206330174472202/",
+      "final_url": "https://www.toutiao.com/article/7661736431131965435/",
       "bytes": 4911
     },
     {
       "name": "article_mobile.html",
-      "status": 200,
-      "final_url": "https://m.toutiao.com/video/7690206330174472202/?upstream_biz=toutiao_pc",
-      "bytes": 40486
+      "status": 404,
+      "final_url": "https://m.toutiao.com/article/7661736431131965435/?upstream_biz=toutiao_pc",
+      "bytes": 29000
     }
   ],
   "render_candidates": {
     "shortlink_response.html": {
-      "content_candidate": {
-        "path": "articleinfo.content",
-        "score": 9485,
-        "chars": 1485
-      },
-      "candidates": [
-        {
-          "path": "articleinfo.content",
-          "chars": 1485,
-          "score": 9485
-        }
-      ]
+      "content_candidate": null,
+      "candidates": []
     },
     "article_mobile.html": {
-      "content_candidate": {
-        "path": "articleinfo.content",
-        "score": 9483,
-        "chars": 1483
-      },
-      "candidates": [
-        {
-          "path": "articleinfo.content",
-          "chars": 1483,
-          "score": 9483
-        }
-      ]
+      "content_candidate": null,
+      "candidates": []
     }
   },
   "detail_api_fetches": [
     {
-      "url": "https://m.toutiao.com/i7690206330174472202/info/",
+      "url": "https://m.toutiao.com/i7661736431131965435/info/",
       "status": 200,
-      "final_url": "https://m.toutiao.com/i7690206330174472202/info/",
-      "bytes": 4361,
+      "final_url": "https://m.toutiao.com/i7661736431131965435/info/",
+      "bytes": 70,
       "image_count": 0,
       "top_keys": [
         "_ck",
@@ -75,9 +55,9 @@
       ]
     },
     {
-      "url": "https://m.toutiao.com/pwa/api/wxapp/info/7690206330174472202/",
+      "url": "https://m.toutiao.com/pwa/api/wxapp/info/7661736431131965435/",
       "status": 200,
-      "final_url": "https://m.toutiao.com/pwa/api/wxapp/info/7690206330174472202/",
+      "final_url": "https://m.toutiao.com/pwa/api/wxapp/info/7661736431131965435/",
       "bytes": 27,
       "image_count": 0,
       "top_keys": [
@@ -88,15 +68,13 @@
   ],
   "detail_api_image_count": 0,
   "render_data_found": true,
-  "title": "你们就这么想看主包把头伸进洗衣机么 #cos花絮 #蔚蓝档案 #妃咲 #梦核",
+  "title": "今日头条",
   "author": "",
   "publish_time": "",
-  "paragraphs": [
-    "视频加载中..."
-  ],
+  "paragraphs": [],
   "images": [],
-  "source": "shortlink_response.html:render_data",
-  "text_chars": 8,
-  "paragraph_count": 1,
+  "source": "",
+  "text_chars": 0,
+  "paragraph_count": 0,
   "image_count": 0
 }
