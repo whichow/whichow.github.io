@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 env:
-  TOUTIAO_URL: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.url || inputs.url || 'https://www.toutiao.com/video/7661736431131965435/' }}
+  TOUTIAO_URL: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.url || inputs.url || 'https://m.toutiao.com/is/SJ7mWXyqd6Y/' }}
 
 jobs:
   extract:
