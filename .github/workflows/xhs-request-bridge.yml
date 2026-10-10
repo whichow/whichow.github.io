@@ -1,0 +1,12 @@
+name: XHS Request Bridge
+
+on:
+  push:
+    paths:
+      - ".requests/xhs-*"
+
+jobs:
+  extract:
+    uses: ./.github/workflows/xhs-extract.yml
+    with:
+      url: ${{ github.event.head_commit.message }}
