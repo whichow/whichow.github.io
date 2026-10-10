@@ -1,0 +1,68 @@
+name: Extract Xiaohongshu media
+
+on:
+  push:
+    branches:
+      - xhs-media-extract
+    paths:
+      - ".github/xhs-extract/request.json"
+      - "tools/xhs_media_extract.py"
+      - ".github/workflows/xhs-media-extract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install requests curl_cffi
+
+      - name: Resolve request
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          req = json.loads(Path(".github/xhs-extract/request.json").read_text("utf-8"))
+          url = str(req.get("url") or "").strip()
+          if not url:
+              raise SystemExit("missing url")
+          with open("$GITHUB_ENV", "a", encoding="utf-8") as f:
+              f.write("XHS_URL=" + url + "\n")
+          PY
+
+      - name: Extract Xiaohongshu media
+        continue-on-error: true
+        run: |
+          rm -rf output
+          mkdir -p output
+          python tools/xhs_media_extract.py "$XHS_URL" --out output
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          echo "===== FILES ====="
+          find output -maxdepth 2 -type f -printf '%p %s bytes\n' | sort || true
+          echo "===== RESULT ====="
+          cat output/result.json || true
+
+      - name: Upload extraction artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xhs-extract-${{ github.run_id }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 7
