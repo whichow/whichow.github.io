@@ -126,6 +126,8 @@ def browser_extract(url, out: Path, report: dict):
                         add(u, "performance.log", mime or typ)
                 except Exception:
                     pass
+        except Exception:
+            pass
 
         # JSON/script URL regex fallback
         for m in re.finditer(r'https?://[^"\'<>\\\s]+', src):
