@@ -1,8 +1,8 @@
-# 街头搭讪精神小妹，一次勇敢换来终生幸福！
+# @kookjaeui创作的原声
 
 
 
-- 原文：https://www.toutiao.com/article/7690718638256570915/
+- 原文：https://www.toutiao.com/article/7694504028331327488/
 
 
 
