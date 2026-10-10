@@ -33,13 +33,13 @@ jobs:
       - name: Resolve request
         run: |
           python - <<'PY'
-          import json
+          import json, os
           from pathlib import Path
           req = json.loads(Path(".github/xhs-extract/request.json").read_text("utf-8"))
           url = str(req.get("url") or "").strip()
           if not url:
               raise SystemExit("missing url")
-          with open("$GITHUB_ENV", "a", encoding="utf-8") as f:
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
               f.write("XHS_URL=" + url + "\n")
           PY
 
