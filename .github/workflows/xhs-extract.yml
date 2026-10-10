@@ -1,0 +1,99 @@
+name: XHS Extractor
+
+on:
+  workflow_call:
+    inputs:
+      url:
+        description: "Xiaohongshu short/share link"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Xiaohongshu short/share link"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  XHS_URL: ${{ inputs.url }}
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests selenium faster-whisper
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
+
+      - name: Extract XHS media
+        continue-on-error: true
+        run: |
+          rm -rf output
+          mkdir -p output
+          python tools/xhs_extract.py "$XHS_URL" --out output
+          cat output/result.json || true
+          ls -lah output || true
+
+      - name: Extract audio
+        continue-on-error: true
+        run: |
+          if [ -s output/video.mp4 ]; then
+            ffmpeg -y -i output/video.mp4 -vn -ac 1 -ar 16000 -c:a pcm_s16le output/audio.wav
+          fi
+
+      - name: Transcribe video
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ -s output/audio.wav ]; then
+            cat > /tmp/transcribe.py <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+          model = WhisperModel("small", device="cpu", compute_type="int8")
+          segs, info = model.transcribe("output/audio.wav", language="zh", beam_size=5, vad_filter=True)
+          rows=[]; lines=[]
+          for s in segs:
+              t=s.text.strip()
+              rows.append({"start":round(s.start,3),"end":round(s.end,3),"text":t})
+              lines.append(f"[{s.start:8.2f} - {s.end:8.2f}] {t}")
+          Path("output/transcript.txt").write_text("\n".join(lines), encoding="utf-8")
+          Path("output/transcript.json").write_text(json.dumps({"language":info.language,"language_probability":info.language_probability,"duration":info.duration,"segments":rows}, ensure_ascii=False, indent=2), encoding="utf-8")
+          print("\n".join(lines))
+          PY
+            python /tmp/transcribe.py
+          fi
+
+      - name: Validate
+        shell: bash
+        run: |
+          test -s output/result.json
+          if [ -s output/video.mp4 ]; then
+            echo "video ok"
+          else
+            find output -maxdepth 1 -type f -name 'image_*' | grep -q .
+            echo "images ok"
+          fi
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xhs-extract-${{ github.run_id }}
+          path: output/
+          retention-days: 7
