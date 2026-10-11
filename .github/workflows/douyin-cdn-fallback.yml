@@ -20,7 +20,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          REQUEST_FILE="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep '^.requests/douyin-cdn-' | head -n1)"
+          REQUEST_FILE="$(jq -r '((.head_commit.added // []) + (.head_commit.modified // []))[]? | select(startswith(".requests/douyin-cdn-"))' "$GITHUB_EVENT_PATH" | head -n1)"
           test -n "$REQUEST_FILE"
           URL="$(cat "$REQUEST_FILE")"
           test -n "$URL"
@@ -36,9 +36,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p output
-          curl -fL --retry 3 --retry-all-errors             -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36"             -e "https://www.douyin.com/"             "$MEDIA_URL"             -o output/video.mp4
+          curl -fL --retry 3 --retry-all-errors \
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36" \
+            -e "https://www.douyin.com/" \
+            "$MEDIA_URL" \
+            -o output/video.mp4
           test -s output/video.mp4
-          ffprobe -v error             -show_entries format=duration,size             -show_entries stream=codec_name,codec_type,width,height,r_frame_rate             -of json output/video.mp4 > output/media_info.json
+          ffprobe -v error \
+            -show_entries format=duration,size \
+            -show_entries stream=codec_name,codec_type,width,height,r_frame_rate \
+            -of json output/video.mp4 > output/media_info.json
           python3 - <<'PY'
           import json, os
           from pathlib import Path
