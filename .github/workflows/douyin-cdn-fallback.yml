@@ -15,12 +15,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Resolve request
         shell: bash
         run: |
           set -euo pipefail
-          REQUEST_FILE="$(jq -r '((.head_commit.added // []) + (.head_commit.modified // []))[]? | select(startswith(".requests/douyin-cdn-"))' "$GITHUB_EVENT_PATH" | head -n1)"
+          REQUEST_FILE="$(git diff --name-only HEAD^ HEAD | grep '^.requests/douyin-cdn-' | head -n1)"
           test -n "$REQUEST_FILE"
           URL="$(cat "$REQUEST_FILE")"
           test -n "$URL"
