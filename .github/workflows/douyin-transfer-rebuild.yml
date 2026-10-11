@@ -1,0 +1,71 @@
+name: Douyin Transfer Rebuild
+
+on:
+  push:
+    paths:
+      - ".requests/douyin-transfer-*"
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Resolve transfer request
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQUEST_FILE="$(git diff --name-only HEAD^ HEAD | grep '^.requests/douyin-transfer-' | head -n1)"
+          test -n "$REQUEST_FILE"
+          ID="$(tr -d '\r\n ' < "$REQUEST_FILE")"
+          test -n "$ID"
+          echo "TRANSFER_ID=$ID" >> "$GITHUB_ENV"
+
+      - name: Rebuild video
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          mapfile -t PARTS < <(find .transfer -maxdepth 1 -type f -name "douyin-${TRANSFER_ID}-part*.b64" | sort)
+          test "${#PARTS[@]}" -gt 0
+          cat "${PARTS[@]}" | tr -d '\r\n' | base64 -d > output/video.mp4
+          test -s output/video.mp4
+          ffprobe -v error \
+            -show_entries format=duration,size \
+            -show_entries stream=codec_name,codec_type,width,height,r_frame_rate \
+            -of json output/video.mp4 > output/media_info.json
+          python3 - <<'PY'
+          import json, os, hashlib
+          from pathlib import Path
+          p=Path("output/video.mp4")
+          info=json.loads(Path("output/media_info.json").read_text())
+          out={
+            "source":"remote-transfer-rebuild",
+            "aweme_id":os.environ.get("TRANSFER_ID"),
+            "sha256":hashlib.sha256(p.read_bytes()).hexdigest(),
+            "media_info":info,
+          }
+          Path("output/result.json").write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding="utf-8")
+          PY
+
+      - name: Validate output
+        shell: bash
+        run: |
+          test -s output/video.mp4
+          test -s output/media_info.json
+          test -s output/result.json
+
+      - name: Upload rebuilt artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: douyin-transfer-${{ github.run_id }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 7
