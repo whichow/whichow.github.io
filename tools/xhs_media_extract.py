@@ -324,7 +324,8 @@ def main():
             decoded = unquote(str(raw))
             if not note_id:
                 note_id = extract_note_id(decoded, "")
-            if "xiaohongshu.com" in decoded and ("/discovery/item/" in decoded or "/explore/" in decoded):
+            p = urlparse(decoded)
+            if host_ok(decoded, XHS_HOSTS) and ("/discovery/item/" in p.path or "/explore/" in p.path):
                 note_url = decoded
     report["note_id"] = note_id
     report["note_url"] = note_url
@@ -333,9 +334,10 @@ def main():
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 2
 
+    page_sess = session()
     try:
-        b = get(sess, "https://www.xiaohongshu.com/explore", mobile=False, referer=None)
-        report["bootstrap"] = {"status": b.status_code, "final_url": str(b.url), "cookies": sorted(sess.cookies.keys())}
+        b = get(page_sess, "https://www.xiaohongshu.com/explore", mobile=False, referer=None)
+        report["bootstrap"] = {"status": b.status_code, "final_url": str(b.url), "cookies": sorted(page_sess.cookies.keys())}
     except Exception as e:
         report["errors"].append(f"anonymous bootstrap failed: {type(e).__name__}: {e}")
 
@@ -343,7 +345,7 @@ def main():
     pages = [("shortlink_response.html", short_html)] if short_html else []
     for mobile in (True, False):
         try:
-            r = get(sess, target_url, mobile=mobile, referer=None)
+            r = get(page_sess, target_url, mobile=mobile, referer=None)
             name = "page_mobile.html" if mobile else "page_desktop.html"
             (out / name).write_text(r.text, encoding="utf-8", errors="ignore")
             pages.append((name, r.text))
@@ -389,6 +391,7 @@ def main():
     report["video_candidates"] = video_candidates
     (out / "note.json").write_text(json.dumps(note, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    sess = page_sess
     downloads = []
     for i, url in enumerate(images, 1):
         try:
