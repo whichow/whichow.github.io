@@ -669,11 +669,44 @@ def main() -> int:
         "title_candidates": [], "author_candidates": [], "media_candidates": []
     })
 
-    # Save an easy-to-read metadata text summary.
+    # Save an easy-to-read metadata text summary. Prefer the actual article title
+    # over unrelated activity/download-page titles that can appear earlier.
     if report["title_candidates"]:
-        report["title"] = report["title_candidates"][0]["value"]
+        preferred = next(
+            (x for x in report["title_candidates"] if x.get("path") == "articleInfo.title"),
+            None,
+        )
+        if preferred is None:
+            preferred = next(
+                (x for x in report["title_candidates"] if x.get("path") == "seoTDK.title"),
+                None,
+            )
+        report["title"] = (preferred or report["title_candidates"][0])["value"]
     if report["author_candidates"]:
         report["author"] = report["author_candidates"][0]["value"]
+
+    # VOD GetPlayInfo can return candidates in low-to-high order. Re-rank only
+    # those candidates so the downloader tries the highest-resolution main MP4 first.
+    if report.get("media_candidates") and any(
+        str(x.get("path") or "").startswith("vod.PlayInfoList.")
+        for x in report["media_candidates"]
+    ):
+        def vod_quality_score(item: dict[str, str]) -> int:
+            s = (str(item.get("path") or "") + " " + str(item.get("url") or "")).lower()
+            score = 0
+            for label, value in (
+                ("2160", 70), ("1440", 60), ("1080", 50),
+                ("720", 40), ("540", 30), ("480", 20), ("360", 10),
+            ):
+                if label in s:
+                    score += value
+                    break
+            if "mainplayurl" in s:
+                score += 5
+            if "mp4" in s:
+                score += 3
+            return score
+        report["media_candidates"].sort(key=vod_quality_score, reverse=True)
 
     # Toutiao "from_aweme=1" reflux pages may expose no playable URL/token.
     # Fall back to Douyin's mobile share SSR, which can carry the original aweme item.
