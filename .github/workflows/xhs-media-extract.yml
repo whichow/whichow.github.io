@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/xhs-extract/request.json"
       - "tools/xhs_media_extract.py"
+      - "tools/xhs_kukutool_fallback.mjs"
       - ".github/workflows/xhs-media-extract.yml"
   workflow_dispatch:
 
@@ -49,6 +50,14 @@ jobs:
           rm -rf output
           mkdir -p output
           python tools/xhs_media_extract.py "$XHS_URL" --out output
+
+      - name: KuKuTool video fallback
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ ! -s output/video.mp4 ]; then
+            node tools/xhs_kukutool_fallback.mjs "$XHS_URL" output
+          fi
 
       - name: Diagnostics
         if: always()
