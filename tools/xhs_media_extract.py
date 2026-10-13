@@ -7,7 +7,7 @@ import json
 import re
 import html as html_lib
 from pathlib import Path
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, unquote
 
 try:
     from curl_cffi import requests as crequests
@@ -31,13 +31,14 @@ def session():
     return crequests.Session() if crequests is not None else requests.Session()
 
 
-def get(sess, url: str, mobile=False, stream=False, referer="https://www.xiaohongshu.com/"):
+def get(sess, url: str, mobile=False, stream=False, referer=None):
     headers = {
         "User-Agent": UA_MOBILE if mobile else UA_DESKTOP,
         "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Referer": referer,
     }
+    if referer:
+        headers["Referer"] = referer
     kwargs = dict(headers=headers, allow_redirects=True, timeout=40)
     if stream:
         kwargs["stream"] = True
@@ -52,7 +53,7 @@ def host_ok(url: str, suffixes) -> bool:
 
 
 def resolve(sess, url: str):
-    r = get(sess, url, mobile=True, referer="https://www.xiaohongshu.com/")
+    r = get(sess, url, mobile=True, referer=None)
     chain = []
     for h in list(getattr(r, "history", []) or []) + [r]:
         chain.append({
@@ -315,16 +316,34 @@ def main():
         final_url, short_html = args.url, ""
 
     note_id = extract_note_id(final_url, short_html)
+    note_url = None
+    for h in report.get("redirect_chain", []):
+        for raw in (h.get("location"), h.get("url")):
+            if not raw:
+                continue
+            decoded = unquote(str(raw))
+            if not note_id:
+                note_id = extract_note_id(decoded, "")
+            if "xiaohongshu.com" in decoded and ("/discovery/item/" in decoded or "/explore/" in decoded):
+                note_url = decoded
     report["note_id"] = note_id
+    report["note_url"] = note_url
     if not note_id:
         (out / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 2
 
+    try:
+        b = get(sess, "https://www.xiaohongshu.com/explore", mobile=False, referer=None)
+        report["bootstrap"] = {"status": b.status_code, "final_url": str(b.url), "cookies": sorted(sess.cookies.keys())}
+    except Exception as e:
+        report["errors"].append(f"anonymous bootstrap failed: {type(e).__name__}: {e}")
+
+    target_url = note_url or final_url
     pages = [("shortlink_response.html", short_html)] if short_html else []
-    for mobile in (False, True):
+    for mobile in (True, False):
         try:
-            r = get(sess, final_url, mobile=mobile)
+            r = get(sess, target_url, mobile=mobile, referer=None)
             name = "page_mobile.html" if mobile else "page_desktop.html"
             (out / name).write_text(r.text, encoding="utf-8", errors="ignore")
             pages.append((name, r.text))
