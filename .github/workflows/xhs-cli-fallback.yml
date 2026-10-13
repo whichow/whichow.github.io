@@ -1,0 +1,85 @@
+name: XHS CLI fallback
+
+on:
+  push:
+    branches:
+      - xhs-media-extract
+    paths:
+      - ".github/xhs-cli-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+
+      - name: Install xhs client
+        run: |
+          go install github.com/tamnd/xiaohongshu-cli/cmd/xhs@latest
+
+      - name: Fetch note and video
+        run: |
+          set -e
+          rm -rf xhs_cli_output
+          mkdir -p xhs_cli_output
+          "$HOME/go/bin/xhs" note 6ac205d3000000001801485e --token 'CBR32ELwc6r_qQEdpn3uD4hD2mSxwEM_YjU1HuIgzaFG0=' -o raw > xhs_cli_output/note.json
+          python - <<'PY'
+          import json, pathlib, subprocess, urllib.request
+          out = pathlib.Path("xhs_cli_output")
+          note = json.loads((out/"note.json").read_text("utf-8"))
+          masters = (((note.get("video") or {}).get("masters")) or [])
+          report = {"note": note, "candidates": [], "selected": None, "errors": []}
+          best = None
+          for i, url in enumerate(masters[:12], 1):
+              dest = out / f"candidate_{i:02d}.mp4"
+              try:
+                  req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0","Referer":"https://www.xiaohongshu.com/"})
+                  with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as f:
+                      while True:
+                          b = r.read(1024*1024)
+                          if not b: break
+                          f.write(b)
+                  probe = subprocess.run([
+                      "ffprobe","-v","error","-show_entries",
+                      "format=duration,size,bit_rate:stream=index,codec_name,width,height,r_frame_rate",
+                      "-of","json",str(dest)
+                  ], capture_output=True, text=True, check=True)
+                  meta = json.loads(probe.stdout)
+                  v = next((s for s in meta.get("streams",[]) if s.get("width")), {})
+                  score = int(v.get("width") or 0)*int(v.get("height") or 0)
+                  score = score*10**9 + int((meta.get("format") or {}).get("bit_rate") or 0)
+                  item = {"index":i,"url":url,"path":str(dest),"probe":meta,"score":score}
+                  report["candidates"].append(item)
+                  if best is None or score > best[0]:
+                      best=(score,dest,item)
+              except Exception as e:
+                  report["errors"].append(f"candidate {i}: {type(e).__name__}: {e}")
+                  try: dest.unlink()
+                  except: pass
+          if not best:
+              raise SystemExit("no playable video candidate")
+          final = out/"video.mp4"
+          final.write_bytes(best[1].read_bytes())
+          report["selected"] = best[2]
+          for p in out.glob("candidate_*.mp4"):
+              p.unlink(missing_ok=True)
+          (out/"result.json").write_text(json.dumps(report,ensure_ascii=False,indent=2),"utf-8")
+          print(json.dumps(report,ensure_ascii=False,indent=2))
+          PY
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: xhs-cli-fallback-${{ github.run_id }}
+          path: xhs_cli_output/
+          retention-days: 7
