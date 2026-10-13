@@ -1,4 +1,4 @@
-name: XHS CLI fallback
+name: XHS yt-dlp fallback
 
 on:
   push:
@@ -18,68 +18,49 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Go
-        uses: actions/setup-go@v5
+      - name: Python
+        uses: actions/setup-python@v5
         with:
-          go-version: "1.26.6"
+          python-version: "3.11"
 
-      - name: Install xhs client
+      - name: Install downloader
         run: |
-          go install github.com/tamnd/xiaohongshu-cli/cmd/xhs@latest
+          pip install -U "yt-dlp[default,curl-cffi]"
 
-      - name: Fetch note and video
+      - name: Download Xiaohongshu video
+        continue-on-error: true
         run: |
+          rm -rf xhs_ytdlp_output
+          mkdir -p xhs_ytdlp_output
+          URL1='https://www.xiaohongshu.com/discovery/item/6ac205d3000000001801485e?app_platform=android&ignoreEngage=true&app_version=9.49.1&share_from_user_hidden=true&xsec_source=app_share&type=video&xsec_token=CBR32ELwc6r_qQEdpn3uD4hD2mSxwEM_YjU1HuIgzaFG0%3D&author_share=1&xhsshare=CopyLink&shareRedId=ODhGQUY4SDs2NzUyOTgwNjdIOThISEo8&apptime=1791883253&share_id=26e8d0f6273c454eac3be5f2b93838f4&share_channel=copy_link&track_code=6gtD6j78AtT'
+          URL2='https://xhslink.cn/o/6gtD6j78AtT'
+          set +e
+          yt-dlp -v --no-playlist --impersonate chrome -f 'bestvideo+bestaudio/best' --merge-output-format mp4 -o 'xhs_ytdlp_output/video.%(ext)s' "$URL1" 2>&1 | tee xhs_ytdlp_output/attempt1.log
+          RC1=${PIPESTATUS[0]}
+          if ! find xhs_ytdlp_output -maxdepth 1 -type f -name 'video.*' | grep -q .; then
+            yt-dlp -v --no-playlist --impersonate chrome -f 'bestvideo+bestaudio/best' --merge-output-format mp4 -o 'xhs_ytdlp_output/video.%(ext)s' "$URL2" 2>&1 | tee xhs_ytdlp_output/attempt2.log
+            RC2=${PIPESTATUS[0]}
+          else
+            RC2=0
+          fi
           set -e
-          rm -rf xhs_cli_output
-          mkdir -p xhs_cli_output
-          "$HOME/go/bin/xhs" note 6ac205d3000000001801485e --token 'CBR32ELwc6r_qQEdpn3uD4hD2mSxwEM_YjU1HuIgzaFG0=' -o raw > xhs_cli_output/note.json
-          python - <<'PY'
-          import json, pathlib, subprocess, urllib.request
-          out = pathlib.Path("xhs_cli_output")
-          note = json.loads((out/"note.json").read_text("utf-8"))
-          masters = (((note.get("video") or {}).get("masters")) or [])
-          report = {"note": note, "candidates": [], "selected": None, "errors": []}
-          best = None
-          for i, url in enumerate(masters[:12], 1):
-              dest = out / f"candidate_{i:02d}.mp4"
-              try:
-                  req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0","Referer":"https://www.xiaohongshu.com/"})
-                  with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as f:
-                      while True:
-                          b = r.read(1024*1024)
-                          if not b: break
-                          f.write(b)
-                  probe = subprocess.run([
-                      "ffprobe","-v","error","-show_entries",
-                      "format=duration,size,bit_rate:stream=index,codec_name,width,height,r_frame_rate",
-                      "-of","json",str(dest)
-                  ], capture_output=True, text=True, check=True)
-                  meta = json.loads(probe.stdout)
-                  v = next((s for s in meta.get("streams",[]) if s.get("width")), {})
-                  score = int(v.get("width") or 0)*int(v.get("height") or 0)
-                  score = score*10**9 + int((meta.get("format") or {}).get("bit_rate") or 0)
-                  item = {"index":i,"url":url,"path":str(dest),"probe":meta,"score":score}
-                  report["candidates"].append(item)
-                  if best is None or score > best[0]:
-                      best=(score,dest,item)
-              except Exception as e:
-                  report["errors"].append(f"candidate {i}: {type(e).__name__}: {e}")
-                  try: dest.unlink()
-                  except: pass
-          if not best:
-              raise SystemExit("no playable video candidate")
-          final = out/"video.mp4"
-          final.write_bytes(best[1].read_bytes())
-          report["selected"] = best[2]
-          for p in out.glob("candidate_*.mp4"):
-              p.unlink(missing_ok=True)
-          (out/"result.json").write_text(json.dumps(report,ensure_ascii=False,indent=2),"utf-8")
-          print(json.dumps(report,ensure_ascii=False,indent=2))
-          PY
+          VID="$(find xhs_ytdlp_output -maxdepth 1 -type f -name 'video.*' ! -name '*.part' | head -n1)"
+          if [ -n "$VID" ] && [ -s "$VID" ]; then
+            if [ "$VID" != "xhs_ytdlp_output/video.mp4" ]; then
+              ffmpeg -y -i "$VID" -c copy xhs_ytdlp_output/video.mp4
+            fi
+            ffprobe -v error -show_entries format=duration,size,bit_rate:stream=index,codec_name,width,height,r_frame_rate -of json xhs_ytdlp_output/video.mp4 > xhs_ytdlp_output/probe.json
+            echo '{"success":true}' > xhs_ytdlp_output/status.json
+          else
+            printf '{"success":false,"attempt1":%s,"attempt2":%s}\n' "$RC1" "$RC2" > xhs_ytdlp_output/status.json
+            exit 1
+          fi
 
       - name: Upload
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: xhs-cli-fallback-${{ github.run_id }}
-          path: xhs_cli_output/
+          name: xhs-ytdlp-fallback-${{ github.run_id }}
+          path: xhs_ytdlp_output/
+          if-no-files-found: warn
           retention-days: 7
