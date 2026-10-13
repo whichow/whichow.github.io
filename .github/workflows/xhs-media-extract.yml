@@ -28,7 +28,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests curl_cffi
+          pip install requests curl_cffi xhshow
 
       - name: Resolve request
         run: |
