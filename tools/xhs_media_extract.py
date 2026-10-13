@@ -7,7 +7,7 @@ import json
 import re
 import html as html_lib
 from pathlib import Path
-from urllib.parse import urlparse, urlunparse, unquote
+from urllib.parse import urlparse, urlunparse, unquote, parse_qs
 
 try:
     from curl_cffi import requests as crequests
@@ -177,6 +177,113 @@ def pick_note(state, note_id: str):
             best, best_score = d, score
     return best if best_score >= 20 else None
 
+
+
+def extract_xsec_context(note_url: str | None, chain=None):
+    candidates = []
+    if note_url:
+        candidates.append(note_url)
+    for h in chain or []:
+        for raw in (h.get("location"), h.get("url")):
+            if raw:
+                candidates.append(unquote(str(raw)))
+    for raw in candidates:
+        try:
+            q = parse_qs(urlparse(raw).query)
+            token = (q.get("xsec_token") or [""])[0]
+            source = (q.get("xsec_source") or [""])[0]
+            if token:
+                return token, source or "app_share"
+        except Exception:
+            pass
+    return "", "app_share"
+
+
+def signed_feed_note(sess, note_id: str, note_url: str | None, report: dict):
+    try:
+        from xhshow import Xhshow
+    except Exception as e:
+        report["errors"].append(f"xhshow import failed: {type(e).__name__}: {e}")
+        return None
+
+    xsec_token, xsec_source = extract_xsec_context(note_url, report.get("redirect_chain"))
+    if not xsec_token:
+        report["errors"].append("signed feed fallback missing xsec_token")
+        return None
+
+    client = Xhshow()
+    cookies = {}
+    try:
+        cookies.update(sess.cookies.get_dict())
+    except Exception:
+        try:
+            for c in sess.cookies:
+                name = getattr(c, "name", None)
+                value = getattr(c, "value", None)
+                if name and value:
+                    cookies[name] = value
+        except Exception:
+            pass
+
+    if not cookies.get("a1"):
+        cookies["a1"] = client.generate_a1()
+    if not cookies.get("webId"):
+        try:
+            cookies["webId"] = client.generate_web_id(cookies["a1"])
+        except Exception:
+            pass
+    cookies.setdefault("xsecappid", "xhs-pc-web")
+
+    payload = {
+        "source_note_id": note_id,
+        "image_formats": ["jpg", "webp", "avif"],
+        "extra": {"need_body_topic": "1"},
+        "xsec_source": xsec_source,
+        "xsec_token": xsec_token,
+    }
+    url = "https://edith.xiaohongshu.com/api/sns/web/v1/feed"
+    try:
+        signed = client.sign_headers_post(
+            uri=url,
+            cookies=cookies,
+            payload=payload,
+            x_rap=True,
+        )
+        headers = {
+            "User-Agent": UA_DESKTOP,
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Content-Type": "application/json;charset=UTF-8",
+            "Origin": "https://www.xiaohongshu.com",
+            "Referer": note_url or "https://www.xiaohongshu.com/",
+            **signed,
+        }
+        kwargs = dict(headers=headers, json=payload, cookies=cookies, timeout=40)
+        if crequests is not None and sess.__class__.__module__.startswith("curl_cffi"):
+            kwargs["impersonate"] = "chrome"
+        r = sess.post(url, **kwargs)
+        report["signed_feed"] = {
+            "status": r.status_code,
+            "content_type": r.headers.get("content-type", ""),
+            "bytes": len(r.content),
+            "xsec_source": xsec_source,
+            "has_xsec_token": bool(xsec_token),
+            "cookie_names": sorted(cookies.keys()),
+        }
+        try:
+            data = r.json()
+        except Exception:
+            report["errors"].append("signed feed returned non-json response")
+            return None
+        report["signed_feed"]["code"] = data.get("code") if isinstance(data, dict) else None
+        report["signed_feed"]["msg"] = data.get("msg") if isinstance(data, dict) else None
+        note = pick_note(data, note_id) if isinstance(data, dict) else None
+        if isinstance(note, dict):
+            return note
+        report["errors"].append("signed feed response did not contain note data")
+    except Exception as e:
+        report["errors"].append(f"signed feed fallback failed: {type(e).__name__}: {e}")
+    return None
 
 def media_https(url: str) -> str:
     if not isinstance(url, str):
@@ -369,8 +476,13 @@ def main():
                 break
 
     if not note:
+        note = signed_feed_note(sess, note_id, note_url, report)
+        if isinstance(note, dict):
+            source = "signed_feed_api"
+
+    if not note:
         report["title"] = next((title_from_html(p) for _, p in pages if title_from_html(p)), "")
-        report["errors"].append("note data not found in public INITIAL_STATE")
+        report["errors"].append("note data not found in public INITIAL_STATE or signed feed API")
         (out / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 3
