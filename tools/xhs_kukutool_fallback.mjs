@@ -38,25 +38,60 @@ async function sessionCookie() {
   return cookieString("", res);
 }
 
+async function discoverAuthProfiles() {
+  const page = await fetch(`${BASE}/xiaohongshu`, {headers:{"user-agent":UA}});
+  const html = await page.text();
+  const scriptUrls = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/g)]
+    .map(m => new URL(m[1], BASE).href);
+  const suffixes = new Set();
+  for (const url of scriptUrls) {
+    try {
+      const js = await (await fetch(url, {headers:{"user-agent":UA, referer:`${BASE}/xiaohongshu`}})).text();
+      for (const m of js.matchAll(/auth-([a-zA-Z0-9_-]{4,32})/g)) suffixes.add(m[1]);
+    } catch {}
+  }
+  return [...suffixes];
+}
+
 async function authorize(sourceUrl, cookie) {
-  const {res, data} = await jsonFetch(`${BASE}/api/auth-25e532`, {
-    method:"POST",
-    headers:{
-      "content-type":"application/json",
-      "user-agent":UA,
-      "referer":`${BASE}/xiaohongshu`,
-      "origin":BASE,
-      "cookie":cookie
-    },
-    body:JSON.stringify({
-      requestURL:sourceUrl,
-      pagePath:"/xiaohongshu",
-      mode:"single"
-    })
-  });
-  if (!res.ok) throw new Error(`auth http ${res.status}`);
-  if (!data.k_25e532 || !data.s_25e532) throw new Error("auth response missing key/seed");
-  return {key:data.k_25e532, seed:data.s_25e532, cookie:cookieString(cookie,res)};
+  const payload = {
+    requestURL:sourceUrl,
+    pagePath:"/xiaohongshu",
+    mode:"single"
+  };
+  const suffixes = ["25e532", ...(await discoverAuthProfiles())];
+  const tried = [];
+  for (const suffix of [...new Set(suffixes)]) {
+    const route = `${BASE}/api/auth-${suffix}`;
+    try {
+      const {res, data} = await jsonFetch(route, {
+        method:"POST",
+        headers:{
+          "content-type":"application/json",
+          "user-agent":UA,
+          "referer":`${BASE}/xiaohongshu`,
+          "origin":BASE,
+          "cookie":cookie
+        },
+        body:JSON.stringify(payload)
+      });
+      tried.push({suffix,status:res.status});
+      const keyField = `k_${suffix}`;
+      const seedField = `s_${suffix}`;
+      if (res.ok && data?.[keyField] && data?.[seedField]) {
+        return {
+          key:data[keyField],
+          seed:data[seedField],
+          suffix,
+          cookie:cookieString(cookie,res),
+          tried
+        };
+      }
+    } catch (e) {
+      tried.push({suffix,error:String(e?.message || e)});
+    }
+  }
+  throw new Error("auth discovery failed: "+JSON.stringify(tried));
 }
 
 function encryptPayload(params, auth) {
@@ -68,13 +103,12 @@ function encryptPayload(params, auth) {
     cipher.final(),
     cipher.getAuthTag()
   ]);
-  return {
-    version:3,
-    k_25e532:auth.key,
-    p_25e532:encrypted.toString("base64"),
-    i_25e532:iv.toString("base64"),
-    r_25e532:1
-  };
+  const out = {version:3};
+  out[`k_${auth.suffix}`] = auth.key;
+  out[`p_${auth.suffix}`] = encrypted.toString("base64");
+  out[`i_${auth.suffix}`] = iv.toString("base64");
+  out[`r_${auth.suffix}`] = 1;
+  return out;
 }
 
 function customB64(value) {
