@@ -17,7 +17,7 @@
         "wxId": "gh_672f4fa64015",
         "bizInfo": "MjM5ODQ2MDIyMA=="
       },
-      "last_redfox_error": "积分余额不足，当前调用积分0.4，剩余积分0.0；本次调用未执行。请前往 https://redfox.hk/dashboard/recharge 充值后重试。"
+      "last_redfox_error": "积分不足，请完成支付后重试"
     },
     {
       "query": "河北日报",
@@ -34,7 +34,7 @@
       },
       "last_backend": "sogou-fallback",
       "_extract_nonce": "realtime-article-final-20260928",
-      "last_redfox_error": "积分余额不足，当前调用积分0.4，剩余积分0.0；本次调用未执行。请前往 https://redfox.hk/dashboard/recharge 充值后重试。"
+      "last_redfox_error": "积分不足，请完成支付后重试"
     }
   ]
 }
