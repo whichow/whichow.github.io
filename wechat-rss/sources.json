@@ -17,7 +17,7 @@
         "wxId": "gh_672f4fa64015",
         "bizInfo": "MjM5ODQ2MDIyMA=="
       },
-      "last_redfox_error": "积分不足，请完成支付后重试"
+      "last_redfox_error": "请求异常，请仔细检查填写的参数是否有误"
     },
     {
       "query": "河北日报",
@@ -34,7 +34,7 @@
       },
       "last_backend": "sogou-fallback",
       "_extract_nonce": "realtime-article-final-20260928",
-      "last_redfox_error": "积分不足，请完成支付后重试"
+      "last_redfox_error": "请求异常，请仔细检查填写的参数是否有误"
     }
   ]
 }
