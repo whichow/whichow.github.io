@@ -1,73 +1,73 @@
 {
-  "input_url": "https://m.toutiao.com/is/RIJJ9AlUw04/",
+  "input_url": "https://m.toutiao.com/is/tKq0i5vXEN0/",
   "errors": [],
   "source_project": "NanmiCoder/NewsCrawler",
-  "resolved_url": "https://m.toutiao.com/video/7694594831431958579/?app=news_article&category_new=__all__&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=1ae15c22-c7b7-11f1-bc62-2c9d90bb6f5c&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1791972466&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link",
+  "resolved_url": "https://m.toutiao.com/article/7706676277503197759/?app=news_article&category_new=apn&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=de65754f-6dc9-4745-aece-8c991e776ed2&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1794370013&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link",
   "redirect_chain": [
     {
       "status": 302,
-      "url": "https://m.toutiao.com/is/RIJJ9AlUw04/",
-      "location": "https://m.toutiao.com/video/7694594831431958579/?app=news_article&category_new=__all__&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=1ae15c22-c7b7-11f1-bc62-2c9d90bb6f5c&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1791972466&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link"
+      "url": "https://m.toutiao.com/is/tKq0i5vXEN0/",
+      "location": "https://m.toutiao.com/article/7706676277503197759/?app=news_article&category_new=apn&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=de65754f-6dc9-4745-aece-8c991e776ed2&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1794370013&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link"
     },
     {
       "status": 200,
-      "url": "https://m.toutiao.com/video/7694594831431958579/?app=news_article&category_new=__all__&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=1ae15c22-c7b7-11f1-bc62-2c9d90bb6f5c&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1791972466&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link",
+      "url": "https://m.toutiao.com/article/7706676277503197759/?app=news_article&category_new=apn&module_name=Android_tt_url&share_did=MS4wLjACAAAA8d9INM2SsIFGcWfa-V3D0Luz70SfcwyYCS_a3bGzmhw&share_token=de65754f-6dc9-4745-aece-8c991e776ed2&share_uid=MS4wLjABAAAAYnNlHfqoEmHRvZvnX8l2hjetRZyKG4Mh7N2zo1Esb9Y&timestamp=1794370013&tt_from=copy_link&upstream_biz=Android_url&utm_campaign=client_share&utm_medium=toutiao_android&utm_source=copy_link",
       "location": null
     }
   ],
-  "article_id": "7694594831431958579",
-  "canonical_url": "https://www.toutiao.com/article/7694594831431958579/",
+  "article_id": "7706676277503197759",
+  "canonical_url": "https://www.toutiao.com/article/7706676277503197759/",
   "fetches": [
     {
       "name": "article_desktop.html",
       "status": 200,
-      "final_url": "https://www.toutiao.com/article/7694594831431958579/",
+      "final_url": "https://www.toutiao.com/article/7706676277503197759/",
       "bytes": 4911
     },
     {
       "name": "article_mobile.html",
       "status": 200,
-      "final_url": "https://m.toutiao.com/video/7694594831431958579/?upstream_biz=toutiao_pc",
-      "bytes": 39567
+      "final_url": "https://m.toutiao.com/article/7706676277503197759/?upstream_biz=toutiao_pc",
+      "bytes": 53583
     }
   ],
   "render_candidates": {
     "shortlink_response.html": {
       "content_candidate": {
         "path": "articleinfo.content",
-        "score": 9484,
-        "chars": 1484
+        "score": 10308,
+        "chars": 2308
       },
       "candidates": [
         {
           "path": "articleinfo.content",
-          "chars": 1484,
-          "score": 9484
+          "chars": 2308,
+          "score": 10308
         }
       ]
     },
     "article_mobile.html": {
       "content_candidate": {
         "path": "articleinfo.content",
-        "score": 9483,
-        "chars": 1483
+        "score": 10308,
+        "chars": 2308
       },
       "candidates": [
         {
           "path": "articleinfo.content",
-          "chars": 1483,
-          "score": 9483
+          "chars": 2308,
+          "score": 10308
         }
       ]
     }
   },
   "detail_api_fetches": [
     {
-      "url": "https://m.toutiao.com/i7694594831431958579/info/",
+      "url": "https://m.toutiao.com/i7706676277503197759/info/",
       "status": 200,
-      "final_url": "https://m.toutiao.com/i7694594831431958579/info/",
-      "bytes": 4226,
-      "image_count": 0,
+      "final_url": "https://m.toutiao.com/i7706676277503197759/info/",
+      "bytes": 5988,
+      "image_count": 3,
       "top_keys": [
         "_ck",
         "data",
@@ -75,9 +75,9 @@
       ]
     },
     {
-      "url": "https://m.toutiao.com/pwa/api/wxapp/info/7694594831431958579/",
+      "url": "https://m.toutiao.com/pwa/api/wxapp/info/7706676277503197759/",
       "status": 200,
-      "final_url": "https://m.toutiao.com/pwa/api/wxapp/info/7694594831431958579/",
+      "final_url": "https://m.toutiao.com/pwa/api/wxapp/info/7706676277503197759/",
       "bytes": 27,
       "image_count": 0,
       "top_keys": [
@@ -86,17 +86,28 @@
       ]
     }
   ],
-  "detail_api_image_count": 0,
+  "detail_api_image_count": 3,
   "render_data_found": true,
-  "title": "#甲烷少女 #搞笑 #二次元",
-  "author": "",
+  "title": "AI批量复活停运老游戏！行业乱象彻底爆发",
+  "author": "檀木品茶香",
   "publish_time": "",
   "paragraphs": [
-    "视频加载中..."
+    "从2026年9月开始，游戏圈悄悄掀起一场“复活潮”。曾经停服下架的《扩散性百万亚瑟王》《幻书启世录》等经典老游戏，靠着AI技术重新上线，让无数老玩家直呼青春回归，但背后隐藏的版权乱象和行业争议，远比表面热闹复杂。",
+    "放在以前，想要复活一款停运游戏，是资深技术大佬的专属操作。需要手动逆向工程，耗费上千小时拆解代码、复刻内容，普通人根本做不到。但现在AI彻底降低了门槛，几十分钟就能完成拆解复刻，算力成本仅需几十元，零基础玩家也能轻松操作。",
+    "目前玩家用AI复活老游戏主要分三种形式，简单好懂：只是展示画面的记忆画廊、可单机游玩的复刻客户端、能联机开服的完整服务端。也正因操作简单，一大批停运二次元老游戏纷纷重现网络，在短视频平台刷屏爆火。",
+    "技术普及的同时，灰色产业链也随之诞生。很多不会操作的玩家花钱找人代复活游戏，网上大量倒卖游戏复活安装包的商家层出不穷。这里必须说清楚：个人纯兴趣免费体验基本没问题，但只要收费牟利、公开提供联机服务，就属于违规私服，妥妥的侵权行为，也是各大游戏厂商重点打击的对象。",
+    "更严重的是，AI复刻不止影响老游戏，还开始威胁新游戏。近期不少独立开发者害怕作品被AI快速抄袭复刻，直接取消了游戏试玩版公开，改成封闭测试，严重打击了原创游戏的创作热情。",
+    "这件事也引发了玩家和厂商的巨大争议。玩家觉得，自己在游戏里投入大量时间、金钱和情感，厂商一纸停服公告就让所有付出归零，十分不合理。海外甚至兴起相关运动，呼吁厂商停服后为玩家开放离线怀旧版本。",
+    "其实行业并非没有最优解，此前《食物语》停服后，官方推出无付费、无更新的纯陪伴怀旧版，完美平衡了玩家情怀和版权问题。",
+    "说到底，AI复活老游戏是技术红利，不该被灰色产业滥用。厂商与其一味封禁打压，不如顺应玩家情怀，用合规方式留存玩家的青春回忆，这才是游戏行业长久发展的正道。"
   ],
-  "images": [],
-  "source": "shortlink_response.html:render_data",
-  "text_chars": 8,
-  "paragraph_count": 1,
-  "image_count": 0
+  "images": [
+    "https://p3-sign.toutiaoimg.com/tos-cn-i-axegupay5k/cf3e20d7d8864002ac1292fed3eece7e~tplv-tt-large.image?_iz=30575&lk3s=06827d14&x-expires=1794976261&x-signature=ksrUN3VWPrEKvxZiZWPweYoJF6w%3D",
+    "https://p3-sign.toutiaoimg.com/tos-cn-i-6w9my0ksvp/41c16e4520e14d43b113320c50aea5d5~tplv-tt-large.image?_iz=30575&lk3s=06827d14&x-expires=1794976261&x-signature=y%2B%2Bp7b7unjjUDKnioK%2FUpm%2FIIgM%3D",
+    "https://p3-sign.toutiaoimg.com/tos-cn-i-6w9my0ksvp/866dcad0bb1947ed868e131cb65e9798~tplv-tt-large.image?_iz=30575&lk3s=06827d14&x-expires=1794976261&x-signature=dNs2Zadkwb4X6hqcrgiuyzB2wG4%3D"
+  ],
+  "source": "shortlink_response.html:dom",
+  "text_chars": 767,
+  "paragraph_count": 8,
+  "image_count": 3
 }
