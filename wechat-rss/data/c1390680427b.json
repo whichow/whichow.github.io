@@ -1,10 +1,10 @@
 {
   "query": "MacTalk",
   "name": "MacTalk",
-  "status": "ok",
-  "message": "",
-  "search_url": "https://weixin.sogou.com/weixin?type=2&query=MacTalk&ie=utf8&s_from=input&page=1",
-  "updated_at": 1795478512,
+  "status": "blocked",
+  "message": "搜狗微信没有返回文章结果；请确认输入的是准确公众号名称或微信号",
+  "search_url": "",
+  "updated_at": 1795514657,
   "items": [
     {
       "guid": "d79365ee6f267aa7a716258f74e2fbb3",
